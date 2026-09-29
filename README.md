@@ -14,7 +14,10 @@ piastre, provini, chiavi) in formato STL o STEP e fa quanto segue:
    baricentro**, finché ogni sotto-regione ha `area ≤ max_area` **e** `AR ≤ max_ar`;
 4. assegna a regioni adiacenti angoli di infill alternati (45°/135°);
 5. scrive un report JSON, un'immagine PNG di controllo e **un file STL per ogni
-   sotto-regione**, da usare come *modifier* in Bambu Studio.
+   sotto-regione**, da usare come *modifier* in Bambu Studio;
+6. con `--export-3mf`, scrive anche un **progetto Bambu Studio (.3mf) pronto**:
+   pezzo e modifier già assemblati, modifier già di tipo "Modifier" e
+   `infill_direction` già impostato (45°/135° alternati).
 
 ![provino 100×20](docs/esempio_provino.png)
 ![chiave](docs/esempio_chiave.png)
@@ -53,6 +56,9 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--step-tolerance` | 0.05 | deflessione lineare della tassellazione STEP [mm] |
 | `--raster-pixel` | 0.1 | pixel [mm] per il controllo dei momenti con `cv2.moments` (0 = salta) |
 | `--prefix` | nome file | prefisso dei file di output |
+| `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
+| `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
+| `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
 | `--no-stl`, `--no-png` | | non scrive gli STL / il PNG |
 
 Per generare dei pezzi di prova (provino 100×20×4, L, piastra forata, chiave):
@@ -71,6 +77,7 @@ Con `--out-dir output` e input `provino.stl`:
 | `provino_sections.json` | parametri, momenti del pezzo, verifica vettoriale/raster dei momenti; per ogni regione: poligono, bbox, area, AR, baricentro, angolo, profondità, percorso di bisezione, vicini, STL del modifier |
 | `provino_sections.png` | sagoma, regioni colorate e tratteggiate secondo l'angolo, tagli, ellissi equivalenti, contorni dei modifier |
 | `provino_modifier_00_45deg.stl`, … | un prisma per ogni regione, **nello stesso sistema di coordinate del pezzo**. Il numero è l'id della regione, il suffisso è l'angolo da assegnare |
+| `provino.3mf` | (solo con `--export-3mf`) progetto Bambu Studio con pezzo + modifier configurati |
 
 Sul provino 100×20 mm con le soglie di default:
 
@@ -159,17 +166,49 @@ I test coprono:
 - partizione esatta (nessuna area scoperta o sovrapposta) su forme generiche;
 - copertura dei modifier;
 - pipeline completa STL → JSON/PNG/STL;
-- lettura STEP, saltata se `cadquery-ocp` non è installato.
+- lettura STEP, saltata se `cadquery-ocp` non è installato;
+- export `.3mf`: confronto con un progetto salvato a mano da Bambu Studio 2.08
+  (`tests/data/bambu_reference_provino.3mf`). Devono coincidere trasformazioni,
+  posizione sul piatto, geometria vertice per vertice e impostazioni di
+  stampante/filamento. I modifier devono avere tipo `modifier_part` e
+  l'`infill_direction` corretto. C'è anche una lettura di controllo con
+  `lib3mf` (la libreria di riferimento del consorzio 3MF), se installata
+  (`pip install lib3mf`).
 
 ---
 
 ## Import in Bambu Studio, passo per passo
 
-> **Nota.** I nomi dei menu qui sotto si riferiscono a Bambu Studio 1.9/2.x e
+> **Nota.** I nomi dei menu qui sotto si riferiscono a Bambu Studio 2.08 e
 > possono cambiare leggermente tra versioni. La verifica decisiva è sempre
-> l'anteprima dopo lo slicing (punto 5).
+> l'anteprima dopo lo slicing.
 
-### Metodo A (consigliato): caricare pezzo e modifier insieme come oggetto multi-parte
+### Metodo 0 (consigliato): progetto `.3mf` generato automaticamente
+
+1. Prepara una volta sola un **progetto modello** con la stampante, il filamento e
+   il processo della campagna sperimentale (es. H2D + PA6). In Bambu Studio
+   imposta i preset e salva con **File → Save Project As…**. Il file deve essere
+   `.3mf`, **non** `.gcode.3mf`.
+2. Genera il progetto:
+   ```bash
+   python section_infill.py provino.stl --out-dir output --export-3mf \
+       --template-3mf modello_H2D_PA6.3mf \
+       --3mf-setting sparse_infill_pattern=zig-zag --3mf-setting sparse_infill_density=100%
+   ```
+   Ogni modifier riceve `infill_direction` (45 o 135) più gli override passati
+   con `--3mf-setting`. Le chiavi sono quelle di configurazione di Bambu Studio,
+   per esempio `sparse_infill_pattern`, `sparse_infill_density`,
+   `infill_direction`. Senza `--template-3mf` il progetto non contiene
+   impostazioni di stampa e Bambu Studio usa i preset selezionati in quel momento.
+3. Apri `output/provino.3mf` in Bambu Studio (File → Open Project).
+4. Controlla nella lista oggetti che le parti `…_modifier_XX_…` abbiano l'icona
+   dei **modifier**, e che ognuna mostri l'override della direzione. Poi fai lo
+   slice e controlla l'anteprima.
+
+Il programma avvisa se il pattern di infill sparso in uso (quello del template o
+del `--3mf-setting`) non stampa una sola direzione per layer, per esempio Grid.
+
+### Metodo A: caricare pezzo e modifier insieme come oggetto multi-parte
 
 Questo metodo conserva **esattamente** le posizioni relative, perché tutti gli STL
 sono nello stesso sistema di coordinate.
@@ -179,19 +218,25 @@ sono nello stesso sistema di coordinate.
 2. Alla domanda *"Multi-part object detected… Load these files as a single object
    with multiple parts?"* rispondi **Sì**. Ottieni un solo oggetto con N+1 parti
    nella lista oggetti.
-3. Nella lista oggetti, per ogni parte `…_modifier_XX_…`: tasto destro → **Change
-   type** → **Modifier**. Il pezzo vero resta "Part". Controlla di non aver
-   convertito il pezzo per errore.
+3. **Passaggio obbligatorio:** nella lista oggetti, per ogni parte
+   `…_modifier_XX_…` fai tasto destro → **Change type** → **Modifier**. Il pezzo
+   vero resta "Part".
+   > ⚠️ Se salti questo passaggio, i "modifier" restano **parti solide** e vengono
+   > stampati: il pezzo diventa 104×24×5 mm invece di 100×20×4, perché i modifier
+   > sporgono di 2 mm per lato e 1 mm sopra. È successo nel primo progetto di
+   > prova: nel `.3mf` le parti risultavano `subtype="normal_part"` e il piatto
+   > slicato misurava 104×24 mm.
 4. Per ogni modifier, imposta la direzione dell'infill:
    - seleziona il modifier nella lista oggetti, poi tasto destro → **Add settings**
      (o l'icona per aggiungere parametri) → categoria **Strength**, oppure cerca
      "direction";
-   - imposta **Sparse infill direction** (chiave di configurazione
-     `infill_direction`) al valore indicato nel nome del file (45 o 135);
-   - per un provino di 3–5 mm, dove gran parte dei layer sono pieni, valuta se
-     impostare anche **Solid infill direction** (`solid_infill_direction`) con
-     lo stesso valore. È una scelta sperimentale da fissare nel DOE e da
-     dichiarare in tesi.
+   - imposta la direzione dell'infill (chiave di configurazione
+     `infill_direction`) al valore indicato nel nome del file (45 o 135).
+     Impostala **esplicitamente anche a 45°**: se in futuro cambi la direzione
+     globale del processo, i modifier lasciati al default la seguirebbero;
+   - in Bambu Studio 2.08 non esiste una direzione separata per l'infill solido:
+     nel G-code di prova anche gli strati pieni (bottom, internal solid, top)
+     seguivano `infill_direction` di ogni modifier.
 5. **Slice** e controlla l'anteprima layer per layer: nelle regioni adiacenti le
    linee d'infill devono risultare ortogonali tra loro.
 
@@ -206,7 +251,8 @@ sono nello stesso sistema di coordinate.
    ogni modifier lo spostamento (X, Y, Z) del centro della sua bounding box
    rispetto al centro di quella del pezzo. Usalo per correggere la posizione nel
    pannello di manipolazione, oppure passa al metodo A.
-4. Imposta la direzione dell'infill come al punto 4 del metodo A.
+4. Controlla che il tipo sia "Modifier" e imposta la direzione dell'infill come
+   ai punti 3–4 del metodo A.
 
 ### Avvertenze
 
@@ -221,37 +267,35 @@ sono nello stesso sistema di coordinate.
   tutte e 4 le regioni avevano linee a 45° e 135° in parti uguali. Negli strati
   pieni (bottom, internal solid, top) invece le regioni alternavano correttamente
   45/135/45/135, con rotazione di 90° a ogni layer. Per l'infill sparso usa un
-  pattern a linee singole: Rectilinear, Zig-zag o Aligned rectilinear, da fissare
-  nel DOE. Controlla sempre nell'anteprima.
+  pattern a linee singole, per esempio Zig-zag o Rectilinear, da fissare nel DOE.
+  Controlla sempre nell'anteprima.
 - Con i pattern a linee singole che ruotano di 90° a ogni layer (come i solidi
   qui sopra), due regioni a 45° e 135° restano in opposizione di fase su *ogni*
-  layer, che è l'alternanza cercata.
+  layer, che è l'alternanza cercata. *Aligned rectilinear* invece non ruota tra
+  i layer: le regioni restano comunque a 45° e 135°, ma l'orientazione di ogni
+  regione è la stessa su tutti i layer. È un'altra condizione sperimentale.
 - I modifier cambiano solo i parametri che imposti. Pareti, top e bottom seguono
   le impostazioni dell'oggetto, a meno di aggiungere altri override.
 
 ---
 
-## TODO: progetto `.3mf` generato automaticamente (stretch goal)
+## Come è costruito il `.3mf`
 
-**Non ancora implementato, di proposito.** Per generare un `.3mf` che Bambu Studio
-apra correttamente (oggetto multi-parte, parti di tipo modifier, override
-`infill_direction` per parte) serve conoscere lo schema esatto che Bambu Studio
-scrive in `3D/3dmodel.model` e `Metadata/model_settings.config` dentro l'archivio
-zip. Non voglio ricostruirlo a memoria.
-
-Prossimi passi:
-1. salvare da Bambu Studio un **progetto** di prova (File → Save Project As…,
-   file `.3mf`) con due modifier impostati a mano a 45° e 135°. **Non** va bene
-   "Export plate sliced file" (`.gcode.3mf`): quel file contiene solo G-code e
-   anteprime, senza geometria né impostazioni per parte (`3D/3dmodel.model` ha
-   `<resources>` vuoto);
-2. ispezionare l'archivio (oggetti e componenti, `<part subtype="modifier_part">`,
-   metadata per parte, trasformazioni) e ricavarne un template;
-3. implementare `--export-3mf` usando quel file come riferimento, e aggiungere un
-   test che confronti la struttura del file generato con quella del file esportato
-   a mano.
-
-Fino ad allora, usa il metodo A qui sopra.
+Il formato è stato ricavato da un progetto salvato da Bambu Studio 2.08
+(`tests/data/bambu_reference_provino.3mf`, da cui è stato rimosso l'id
+dell'account Bambu). Ogni dettaglio è stato verificato sui sorgenti di Bambu
+Studio: `ModelVolume::type_from_string` in `src/libslic3r/Model.cpp` e
+l'importer `_BBS_3MF_Importer` in `src/libslic3r/Format/bbs_3mf.cpp`.
+- un oggetto con componenti in `3D/3dmodel.model`, e una mesh per parte in
+  `3D/Objects/object_1.model`, centrata sulla propria bounding box;
+- in `Metadata/model_settings.config`, ogni parte ha `subtype="normal_part"`
+  (pezzo) oppure `subtype="modifier_part"` (modifier). Ogni altro
+  `<metadata key=… value=…>` della parte viene caricato come override di quella
+  parte, per esempio `infill_direction`;
+- Bambu Studio tratta il file come progetto proprio solo se il metadato
+  `Application` inizia con `BambuStudio-`. Il valore viene copiato dal template;
+- `Metadata/project_settings.config`, cioè stampante, filamento e processo, viene
+  copiato così com'è dal template.
 
 ## Struttura
 
@@ -262,6 +306,9 @@ infill_sectioning/
   moments.py                   momenti esatti (Green) e raster (cv2.moments)
   sectioning.py                bisezione ricorsiva, nsplit, adiacenza, angoli, modifier
   export.py                    JSON, PNG, STL
+  bambu3mf.py                  progetto Bambu Studio (.3mf)
 tests/test_sectioning.py       test (pytest)
+tests/test_bambu3mf.py         test dell'export .3mf
+tests/data/                    progetto di riferimento salvato da Bambu Studio
 examples/make_test_parts.py    pezzi di prova procedurali
 ```

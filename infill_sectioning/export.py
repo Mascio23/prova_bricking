@@ -66,7 +66,7 @@ def write_modifier_stls(result: SectioningResult, out_dir: Path, z_min: float,
         name = f"{prefix}_{r.id:02d}_{int(round(r.angle))}deg.stl"
         mesh = extrude(fp, z_min, z_max + margin_z)
         mesh.export(out_dir / name)
-        files.append((name, fp))
+        files.append((name, fp, mesh))
     return files
 
 
@@ -98,7 +98,7 @@ def build_report(result: SectioningResult, params: dict, input_info: dict,
             "polygon": _poly_json(r.geom),
         }
         if modifier_files:
-            name, fp = modifier_files[r.id]
+            name, fp, _ = modifier_files[r.id]
             entry["modifier_stl"] = name
             entry["modifier_bbox"] = _bbox(fp)
         regions.append(entry)
@@ -195,7 +195,7 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
 
     # modifier outlines (dashed, muted)
     if modifier_files:
-        for _, fp in modifier_files:
+        for _, fp, _ in modifier_files:
             for p in _polys(fp):
                 ax.add_patch(patch(p, facecolor="none", edgecolor=MUTED, lw=0.6,
                                    ls=(0, (3, 2)), zorder=1))

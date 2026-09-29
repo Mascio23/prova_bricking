@@ -8,6 +8,7 @@ rtree>=1.0              # used by trimesh (point-in-mesh queries in the tests)
 opencv-python>=4.8      # cv2.moments cross-check (opencv-python-headless also works)
 matplotlib>=3.7
 pytest>=7.0
+lib3mf>=2.3             # optional: independent 3MF check in the tests
 
 # Optional: STEP input (OpenCascade kernel, pip-installable, no conda needed)
 # cadquery-ocp>=7.7

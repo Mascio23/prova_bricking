@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "method": "Shen, Veeramani, Qin (2026) recursive bisection along the minor axis",
   "input": {
-    "file": "examples/parts/provino_100x20x4.stl",
+    "file": "risultati_provino/provino.stl",
     "n_triangles": 12,
     "bounds_mm": [
       [
@@ -356,5 +356,14 @@
         0.5
       ]
     }
-  ]
+  ],
+  "bambu_3mf": {
+    "file": "provino.3mf",
+    "template": "tests/data/bambu_reference_provino.3mf",
+    "modifier_settings": {
+      "sparse_infill_pattern": "zig-zag",
+      "sparse_infill_density": "100%"
+    },
+    "warning": null
+  }
 }

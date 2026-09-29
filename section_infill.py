@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from infill_sectioning import __version__
+from infill_sectioning.bambu3mf import Volume, build_3mf, pattern_warning, read_template, write_3mf
 from infill_sectioning.export import build_report, write_json, write_modifier_stls, write_png
 from infill_sectioning.footprint import extract_footprint, load_mesh
 from infill_sectioning.moments import polygon_moments, raster_moments
@@ -47,6 +48,16 @@ def parse_args(argv=None):
     p.add_argument("--raster-pixel", type=float, default=0.1,
                    help="pixel size [mm] for the cv2.moments cross-check (0 = skip)")
     p.add_argument("--prefix", default=None, help="file name prefix (default: model name)")
+    p.add_argument("--export-3mf", action="store_true",
+                   help="also write a Bambu Studio project (.3mf) with the part and the "
+                        "modifiers, infill_direction already set on each modifier")
+    p.add_argument("--template-3mf", type=Path, default=None,
+                   help="Bambu Studio project (.3mf, File > Save Project) whose printer/"
+                        "filament/process settings are copied into the exported .3mf")
+    p.add_argument("--3mf-setting", dest="mod_settings", action="append", default=[],
+                   metavar="KEY=VALUE",
+                   help="extra per-modifier override written into the .3mf, repeatable "
+                        "(e.g. sparse_infill_pattern=zig-zag, sparse_infill_density=100%%)")
     p.add_argument("--no-stl", action="store_true", help="do not write modifier STLs")
     p.add_argument("--no-png", action="store_true", help="do not write the PNG preview")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -80,7 +91,7 @@ def run(args) -> dict:
     prefix = args.prefix or args.model.stem
 
     mod_files = None
-    if not args.no_stl:
+    if not args.no_stl or args.export_3mf:
         mod_files = write_modifier_stls(result, out, z_min, z_max, args.margin_xy,
                                         args.margin_z, prefix=f"{prefix}_modifier")
 
@@ -107,11 +118,45 @@ def run(args) -> dict:
                 round(float(c[k] - part_c[k]), 4) for k in range(3)]
     write_json(report, out / f"{prefix}_sections.json")
 
+    if args.export_3mf:
+        report["bambu_3mf"] = export_project(args, mesh, result, mod_files, out, prefix)
+        write_json(report, out / f"{prefix}_sections.json")
+
     if not args.no_png:
         title = (f"{args.model.name} — {len(result.regions)} regions  "
                  f"(mode={args.mode}, max area={args.max_area:g} mm², max AR={args.max_ar:g})")
         write_png(result, out / f"{prefix}_sections.png", title, mod_files)
     return report
+
+
+def parse_settings(items) -> dict:
+    settings = {}
+    for item in items:
+        if "=" not in item:
+            raise SystemExit(f"--3mf-setting expects KEY=VALUE, got {item!r}")
+        k, v = item.split("=", 1)
+        settings[k.strip()] = v.strip()
+    return settings
+
+
+def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
+    extra = parse_settings(args.mod_settings)
+    template = read_template(args.template_3mf) if args.template_3mf else None
+    part_name = args.model.with_suffix(".stl").name
+    volumes = [Volume(part_name, mesh, "normal_part")]
+    for r, (name, _, mmesh) in zip(result.regions, mod_files):
+        settings = {"infill_direction": f"{r.angle:g}", **extra}
+        volumes.append(Volume(name, mmesh, "modifier_part", settings))
+    path = out / f"{prefix}.3mf"
+    write_3mf(path, build_3mf(volumes, prefix, template))
+    warning = pattern_warning(template, extra)
+    if warning:
+        print("WARNING:", warning)
+    if template is None:
+        print("NOTE: no --template-3mf given: the .3mf has no printer/filament/process "
+              "settings, Bambu Studio will use the presets currently selected.")
+    return {"file": path.name, "template": str(args.template_3mf) if template else None,
+            "modifier_settings": extra, "warning": warning}
 
 
 def main(argv=None) -> int:
