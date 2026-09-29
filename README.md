@@ -296,6 +296,13 @@ l'importer `_BBS_3MF_Importer` in `src/libslic3r/Format/bbs_3mf.cpp`.
   `Application` inizia con `BambuStudio-`. Il valore viene copiato dal template;
 - `Metadata/project_settings.config`, cioè stampante, filamento e processo, viene
   copiato così com'è dal template.
+- dal template vengono copiati anche i metadati del piatto, in particolare
+  `filament_map_mode` e `filament_maps`, cioè la mappatura filamento→ugello
+  necessaria per stampanti a due ugelli come l'H2D, e i file ausiliari
+  (`filament_sequence.json`, intestazione di `slice_info.config`). Vengono
+  generate le miniature del piatto (`plate_1.png`, `plate_1_small.png`). A parte
+  le miniature e gli identificativi, il file ha la stessa struttura di un
+  progetto salvato da Bambu Studio.
 
 ## Struttura
 

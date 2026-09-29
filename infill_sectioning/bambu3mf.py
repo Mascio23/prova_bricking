@@ -33,7 +33,8 @@ import uuid
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from xml.sax.saxutils import quoteattr
+from datetime import date
+from xml.sax.saxutils import escape, quoteattr
 
 import numpy as np
 import trimesh
@@ -55,14 +56,23 @@ CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8"?>
 ROOT_RELS = """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
  <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
-</Relationships>
-"""
+ <Relationship Target="/Metadata/plate_1.png" Id="rel-2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/>
+ <Relationship Target="/Metadata/plate_1.png" Id="rel-4" Type="http://schemas.bambulab.com/package/2021/cover-thumbnail-middle"/>
+<Relationship Target="/Metadata/plate_1_small.png" Id="rel-5" Type="http://schemas.bambulab.com/package/2021/cover-thumbnail-small"/>
+</Relationships>"""  # byte-identical to what Bambu Studio 2.08 writes
 
 MODEL_RELS = """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
  <Relationship Target="/3D/Objects/object_1.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
 </Relationships>
 """
+
+CUT_INFO = """<?xml version="1.0" encoding="utf-8"?>
+<objects>
+ <object id="1">
+  <cut_id id="0" check_sum="1" connectors_cnt="0"/>
+ </object>
+</objects>"""
 
 NS = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
       'xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" '
@@ -86,6 +96,17 @@ class Template:
     plate_center: tuple[float, float] = DEFAULT_PLATE_CENTER
     extruder: str = "1"
     global_settings: dict = field(default_factory=dict)
+    # <plate> metadata of the template (e.g. filament_map_mode / filament_maps,
+    # needed by multi-nozzle printers such as the H2D), minus file references
+    plate_metadata: list[tuple[str, str]] = field(default_factory=list)
+    # small auxiliary files copied verbatim (Metadata/filament_sequence.json, ...)
+    aux_files: dict[str, bytes] = field(default_factory=dict)
+
+
+# plate metadata that points to files of the template (thumbnails, G-code) or
+# that is written explicitly by build_3mf
+_PLATE_SKIP = {"plater_id", "plater_name", "locked", "gcode_file", "thumbnail_file",
+               "thumbnail_no_light_file", "top_file", "pick_file", "pattern_bbox_file"}
 
 
 def read_template(path: str | Path) -> Template:
@@ -109,11 +130,55 @@ def read_template(path: str | Path) -> Template:
                           re.DOTALL)
             if m:
                 t.extruder = m.group(1)
+            ms = z.read("Metadata/model_settings.config").decode("utf-8", "replace")
+            plate = re.search(r"<plate>(.*?)</plate>", ms, re.DOTALL)
+            if plate:
+                body = re.sub(r"<model_instance>.*?</model_instance>", "", plate.group(1),
+                              flags=re.DOTALL)
+                t.plate_metadata = [
+                    (k, v) for k, v in re.findall(
+                        r'<metadata key="([^"]*)" value="([^"]*)"/>', body)
+                    if k not in _PLATE_SKIP]
+        if "Metadata/filament_sequence.json" in names:
+            t.aux_files["Metadata/filament_sequence.json"] = \
+                z.read("Metadata/filament_sequence.json")
+        if "Metadata/slice_info.config" in names:
+            info = z.read("Metadata/slice_info.config")
+            if b"<plate>" not in info:  # header only (as in a saved project)
+                t.aux_files["Metadata/slice_info.config"] = info
     area = t.global_settings.get("printable_area")
     if area:
         pts = np.array([[float(v) for v in p.split("x")] for p in area])
         t.plate_center = tuple(float(v) for v in (pts.min(0) + pts.max(0)) / 2)
     return t
+
+
+def _thumbnail(volumes: list[Volume], size: int) -> bytes:
+    """Top view of the model parts (grey on transparent), like Bambu's plate_1.png."""
+    import io
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PolyCollection
+
+    fig = plt.figure(figsize=(1, 1), dpi=size)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_axis_off()
+    parts = [v for v in volumes if v.subtype == "normal_part"]
+    tris = np.concatenate([v.mesh.triangles[:, :, :2] for v in parts])
+    ax.add_collection(PolyCollection(tris, facecolors="#9a9a9a", edgecolors="#9a9a9a", linewidths=0.3))
+    b = np.array([v.mesh.bounds for v in parts])
+    c = (b[:, 0, :2].min(0) + b[:, 1, :2].max(0)) / 2
+    r = 0.55 * (b[:, 1, :2].max(0) - b[:, 0, :2].min(0)).max()
+    ax.set_xlim(c[0] - r, c[0] + r)
+    ax.set_ylim(c[1] - r, c[1] + r)
+    ax.set_aspect("equal")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", transparent=True)
+    plt.close(fig)
+    return buf.getvalue()
 
 
 def _f(v: float) -> str:
@@ -174,10 +239,13 @@ def build_3mf(volumes: list[Volume], object_name: str,
         f'    <component p:path="/3D/Objects/object_1.model" objectid="{i}" '
         f'p:UUID="000{i - 1:05x}-b206-40ff-9872-83e8017abed1" transform="{_t3(tr)}"/>\n'
         for i, tr in comps)
-    meta = "".join(f' <metadata name="{k}">{v}</metadata>\n' for k, v in [
+    today = date.today().isoformat()
+    meta = "".join(f' <metadata name="{k}">{escape(v)}</metadata>\n' for k, v in [
         ("Application", t.application), ("BambuStudio:3mfVersion", "1"),
-        ("Copyright", ""), ("Description", ""), ("Designer", ""), ("License", ""),
-        ("Title", object_name)])
+        ("Copyright", ""), ("CreationDate", today), ("Description", ""), ("Designer", ""),
+        ("DesignerCover", ""), ("DesignerUserId", ""), ("License", ""),
+        ("ModificationDate", today), ("Origin", ""), ("ProfileCover", ""),
+        ("ProfileDescription", ""), ("ProfileTitle", ""), ("Title", "")])
     main_model = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<model unit="millimeter" xml:lang="en-US" {NS}>\n' + meta +
@@ -197,7 +265,12 @@ def build_3mf(volumes: list[Volume], object_name: str,
               ("source_object_id", "0"), ("source_volume_id", "0"),
               ("source_offset_x", _f(c[0])), ("source_offset_y", _f(c[1])),
               ("source_offset_z", _f(c[2])), ("extruder", t.extruder)]
-        md += [(k, str(val)) for k, val in v.settings.items()]
+        settings = {k: str(val) for k, val in v.settings.items()}
+        if "sparse_infill_density" in settings:
+            # Bambu Studio keeps these three equal when the density is edited
+            for k in ("skeleton_infill_density", "skin_infill_density"):
+                settings.setdefault(k, settings["sparse_infill_density"])
+        md += sorted(settings.items())  # Bambu writes per-part keys alphabetically
         parts.append(
             f'    <part id="{i}" subtype="{v.subtype}" uuid="{uid}">\n'
             + "".join(f"      <metadata key={quoteattr(k)} value={quoteattr(val)}/>\n"
@@ -219,7 +292,10 @@ def build_3mf(volumes: list[Volume], object_name: str,
         '    <metadata key="plater_id" value="1"/>\n'
         '    <metadata key="plater_name" value=""/>\n'
         '    <metadata key="locked" value="false"/>\n'
-        "    <model_instance>\n"
+        + "".join(f"    <metadata key={quoteattr(k)} value={quoteattr(v)}/>\n"
+                  for k, v in t.plate_metadata)
+        + '    <metadata key="thumbnail_file" value="Metadata/plate_1.png"/>\n'
+        + "    <model_instance>\n"
         f'      <metadata key="object_id" value="{obj_id}"/>\n'
         '      <metadata key="instance_id" value="0"/>\n'
         '      <metadata key="identify_id" value="1000"/>\n'
@@ -239,6 +315,10 @@ def build_3mf(volumes: list[Volume], object_name: str,
     }
     if t.project_settings is not None:
         files["Metadata/project_settings.config"] = t.project_settings
+    files["Metadata/cut_information.xml"] = CUT_INFO.encode()
+    files["Metadata/plate_1.png"] = _thumbnail(volumes, 512)
+    files["Metadata/plate_1_small.png"] = _thumbnail(volumes, 128)
+    files.update(t.aux_files)
     return files
 
 

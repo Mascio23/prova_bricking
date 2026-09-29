@@ -149,6 +149,12 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         volumes.append(Volume(name, mmesh, "modifier_part", settings))
     path = out / f"{prefix}.3mf"
     write_3mf(path, build_3mf(volumes, prefix, template))
+    n_tri = sum(len(v.mesh.faces) for v in volumes)
+    print(f"3mf: 1 part + {len(volumes) - 1} modifiers, {n_tri} triangles -> {path}")
+    if len(volumes) - 1 > 32 or n_tri > 300_000:
+        print("WARNING: large project (many modifiers or triangles): Bambu Studio may "
+              "take a long time to open it. Consider larger --max-area / --max-ar or a "
+              "lighter mesh.")
     warning = pattern_warning(template, extra)
     if warning:
         print("WARNING:", warning)

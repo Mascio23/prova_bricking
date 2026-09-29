@@ -83,6 +83,22 @@ def test_matches_reference_project(generated):
             assert gp["name"] == rp["name"]
 
 
+def test_plate_and_aux_files_follow_template(generated):
+    gen, ref = read_3mf(generated / "provino.3mf"), read_3mf(REF)
+    for name in ("Metadata/filament_sequence.json", "Metadata/slice_info.config",
+                 "Metadata/cut_information.xml"):
+        assert gen["files"][name] == ref["files"][name]
+    plate = ET.fromstring(gen["files"]["Metadata/model_settings.config"]).find("plate")
+    md = {m.get("key"): m.get("value") for m in plate.iterfind("metadata")}
+    # H2D (two nozzles): filament <-> nozzle mapping must be kept
+    assert md["filament_map_mode"] == "Auto For Flush"
+    assert md["filament_maps"] == "2 1 1 1"
+    assert md["thumbnail_file"] == "Metadata/plate_1.png"
+    for name in ("Metadata/plate_1.png", "Metadata/plate_1_small.png"):
+        assert gen["files"][name].startswith(b"\x89PNG")
+    assert gen["files"]["_rels/.rels"] == ref["files"]["_rels/.rels"]
+
+
 def test_part_types_and_infill_direction(generated):
     parts = read_3mf(generated / "provino.3mf")["parts"]
     assert parts["1"]["subtype"] == "normal_part"
@@ -92,6 +108,9 @@ def test_part_types_and_infill_direction(generated):
         assert parts[pid]["infill_direction"] == angle
         assert parts[pid]["sparse_infill_pattern"] == "zig-zag"
         assert parts[pid]["sparse_infill_density"] == "100%"
+        # kept equal by Bambu Studio, as in the reference project
+        assert parts[pid]["skeleton_infill_density"] == "100%"
+        assert parts[pid]["skin_infill_density"] == "100%"
         assert parts[pid]["name"].endswith(f"_{angle}deg.stl")
 
 
