@@ -214,11 +214,18 @@ sono nello stesso sistema di coordinate.
   dell'infill in Bambu Studio è riferita agli assi del piatto, non al pezzo: se
   ruoti l'oggetto di 90°, 45° e 135° si scambiano rispetto al pezzo. Se ti serve
   un'orientazione diversa, ruota il modello in CAD, riesporta e rigenera.
-- Con il pattern **Rectilinear** lo slicer ruota di 90° la direzione a ogni layer.
-  Quindi due regioni a 45° e 135° restano in opposizione di fase su *ogni* layer,
-  che è l'alternanza cercata. Con pattern che non alternano, o con pattern tipo
-  gyroid in cui la direzione conta poco, l'effetto è diverso: verificalo
-  nell'anteprima.
+- **Non usare il pattern Grid per l'infill sparso.** Grid stampa sia +45° sia
+  −45° su ogni layer, quindi ruotarlo di 90° dà lo stesso identico disegno e
+  l'alternanza 45°/135° tra regioni non ha alcun effetto. L'ho verificato sul
+  G-code di un test reale (Bambu Studio 2.08, Grid 15%): negli strati sparsi
+  tutte e 4 le regioni avevano linee a 45° e 135° in parti uguali. Negli strati
+  pieni (bottom, internal solid, top) invece le regioni alternavano correttamente
+  45/135/45/135, con rotazione di 90° a ogni layer. Per l'infill sparso usa un
+  pattern a linee singole: Rectilinear, Zig-zag o Aligned rectilinear, da fissare
+  nel DOE. Controlla sempre nell'anteprima.
+- Con i pattern a linee singole che ruotano di 90° a ogni layer (come i solidi
+  qui sopra), due regioni a 45° e 135° restano in opposizione di fase su *ogni*
+  layer, che è l'alternanza cercata.
 - I modifier cambiano solo i parametri che imposti. Pareti, top e bottom seguono
   le impostazioni dell'oggetto, a meno di aggiungere altri override.
 
@@ -229,12 +236,15 @@ sono nello stesso sistema di coordinate.
 **Non ancora implementato, di proposito.** Per generare un `.3mf` che Bambu Studio
 apra correttamente (oggetto multi-parte, parti di tipo modifier, override
 `infill_direction` per parte) serve conoscere lo schema esatto che Bambu Studio
-scrive in `3D/3dmodel.model` e `Metadata/model_settings.xml` dentro l'archivio
+scrive in `3D/3dmodel.model` e `Metadata/model_settings.config` dentro l'archivio
 zip. Non voglio ricostruirlo a memoria.
 
 Prossimi passi:
-1. esportare da Bambu Studio un progetto di prova con due modifier impostati a mano
-   a 45° e 135°, e caricarlo nel repo;
+1. salvare da Bambu Studio un **progetto** di prova (File → Save Project As…,
+   file `.3mf`) con due modifier impostati a mano a 45° e 135°. **Non** va bene
+   "Export plate sliced file" (`.gcode.3mf`): quel file contiene solo G-code e
+   anteprime, senza geometria né impostazioni per parte (`3D/3dmodel.model` ha
+   `<resources>` vuoto);
 2. ispezionare l'archivio (oggetti e componenti, `<part subtype="modifier_part">`,
    metadata per parte, trasformazioni) e ricavarne un template;
 3. implementare `--export-3mf` usando quel file come riferimento, e aggiungere un
