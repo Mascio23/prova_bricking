@@ -1,0 +1,360 @@
+{
+  "tool": "section_infill",
+  "version": "0.1.0",
+  "method": "Shen, Veeramani, Qin (2026) recursive bisection along the minor axis",
+  "input": {
+    "file": "examples/parts/provino_100x20x4.stl",
+    "n_triangles": 12,
+    "bounds_mm": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        100.0,
+        20.0,
+        4.0
+      ]
+    ],
+    "z_range_mm": [
+      0.0,
+      4.0
+    ]
+  },
+  "parameters": {
+    "mode": "bisect",
+    "max_area_mm2": 900.0,
+    "max_ar": 2.0,
+    "angles_deg": [
+      45.0,
+      135.0
+    ],
+    "min_area_mm2": 1.0,
+    "max_depth": 12,
+    "footprint_method": "projection",
+    "margin_xy_mm": 2.0,
+    "margin_z_mm": 1.0
+  },
+  "part": {
+    "area_mm2": 2000.0,
+    "centroid": [
+      50.0,
+      10.0
+    ],
+    "aspect_ratio": 5.0,
+    "major_axis_deg": 0.0,
+    "equiv_ellipse_semi_axes_mm": [
+      57.735,
+      11.547
+    ],
+    "bbox": [
+      0.0,
+      0.0,
+      100.0,
+      20.0
+    ],
+    "moments_check": {
+      "raster_pixel_mm": 0.1,
+      "vector": {
+        "area_mm2": 2000.0,
+        "aspect_ratio": 5.0,
+        "major_axis_deg": 0.0
+      },
+      "raster_cv2": {
+        "area_mm2": 2000.0,
+        "aspect_ratio": 5.0001,
+        "major_axis_deg": 0.0
+      },
+      "area_rel_diff": 0.0,
+      "ar_rel_diff": 1.2e-05
+    }
+  },
+  "summary": {
+    "n_regions": 4,
+    "all_within_thresholds": true,
+    "angle_counts": {
+      "45.0": 2,
+      "135.0": 2
+    },
+    "adjacency_conflicts": [],
+    "area_check": {
+      "part_area": 2000.0,
+      "sum_region_area": 2000.0,
+      "uncovered_area": 0.0,
+      "overlap_area": 0.0
+    }
+  },
+  "regions": [
+    {
+      "id": 0,
+      "infill_angle_deg": 45.0,
+      "area_mm2": 500.0,
+      "aspect_ratio": 1.25,
+      "centroid": [
+        12.5,
+        10.0
+      ],
+      "major_axis_deg": 0.0,
+      "equiv_ellipse_semi_axes_mm": [
+        14.4338,
+        11.547
+      ],
+      "bbox": [
+        0.0,
+        0.0,
+        25.0,
+        20.0
+      ],
+      "depth": 2,
+      "split_path": "00",
+      "within_thresholds": true,
+      "stop_reason": "within thresholds",
+      "neighbors": [
+        1
+      ],
+      "polygon": [
+        {
+          "exterior": [
+            [
+              25.0,
+              20.0
+            ],
+            [
+              25.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              20.0
+            ],
+            [
+              25.0,
+              20.0
+            ]
+          ],
+          "holes": []
+        }
+      ],
+      "modifier_stl": "provino_modifier_00_45deg.stl",
+      "modifier_bbox": [
+        -2.0,
+        -2.0,
+        25.0,
+        22.0
+      ],
+      "modifier_center_offset_from_part_center_mm": [
+        -38.5,
+        0.0,
+        0.5
+      ]
+    },
+    {
+      "id": 1,
+      "infill_angle_deg": 135.0,
+      "area_mm2": 500.0,
+      "aspect_ratio": 1.25,
+      "centroid": [
+        37.5,
+        10.0
+      ],
+      "major_axis_deg": 0.0,
+      "equiv_ellipse_semi_axes_mm": [
+        14.4338,
+        11.547
+      ],
+      "bbox": [
+        25.0,
+        0.0,
+        50.0,
+        20.0
+      ],
+      "depth": 2,
+      "split_path": "01",
+      "within_thresholds": true,
+      "stop_reason": "within thresholds",
+      "neighbors": [
+        0,
+        2
+      ],
+      "polygon": [
+        {
+          "exterior": [
+            [
+              50.0,
+              20.0
+            ],
+            [
+              50.0,
+              0.0
+            ],
+            [
+              25.0,
+              0.0
+            ],
+            [
+              25.0,
+              20.0
+            ],
+            [
+              50.0,
+              20.0
+            ]
+          ],
+          "holes": []
+        }
+      ],
+      "modifier_stl": "provino_modifier_01_135deg.stl",
+      "modifier_bbox": [
+        25.0,
+        -2.0,
+        50.0,
+        22.0
+      ],
+      "modifier_center_offset_from_part_center_mm": [
+        -12.5,
+        0.0,
+        0.5
+      ]
+    },
+    {
+      "id": 2,
+      "infill_angle_deg": 45.0,
+      "area_mm2": 500.0,
+      "aspect_ratio": 1.25,
+      "centroid": [
+        62.5,
+        10.0
+      ],
+      "major_axis_deg": 0.0,
+      "equiv_ellipse_semi_axes_mm": [
+        14.4338,
+        11.547
+      ],
+      "bbox": [
+        50.0,
+        0.0,
+        75.0,
+        20.0
+      ],
+      "depth": 2,
+      "split_path": "10",
+      "within_thresholds": true,
+      "stop_reason": "within thresholds",
+      "neighbors": [
+        1,
+        3
+      ],
+      "polygon": [
+        {
+          "exterior": [
+            [
+              50.0,
+              0.0
+            ],
+            [
+              50.0,
+              20.0
+            ],
+            [
+              75.0,
+              20.0
+            ],
+            [
+              75.0,
+              0.0
+            ],
+            [
+              50.0,
+              0.0
+            ]
+          ],
+          "holes": []
+        }
+      ],
+      "modifier_stl": "provino_modifier_02_45deg.stl",
+      "modifier_bbox": [
+        50.0,
+        -2.0,
+        75.0,
+        22.0
+      ],
+      "modifier_center_offset_from_part_center_mm": [
+        12.5,
+        0.0,
+        0.5
+      ]
+    },
+    {
+      "id": 3,
+      "infill_angle_deg": 135.0,
+      "area_mm2": 500.0,
+      "aspect_ratio": 1.25,
+      "centroid": [
+        87.5,
+        10.0
+      ],
+      "major_axis_deg": 0.0,
+      "equiv_ellipse_semi_axes_mm": [
+        14.4338,
+        11.547
+      ],
+      "bbox": [
+        75.0,
+        0.0,
+        100.0,
+        20.0
+      ],
+      "depth": 2,
+      "split_path": "11",
+      "within_thresholds": true,
+      "stop_reason": "within thresholds",
+      "neighbors": [
+        2
+      ],
+      "polygon": [
+        {
+          "exterior": [
+            [
+              100.0,
+              0.0
+            ],
+            [
+              75.0,
+              0.0
+            ],
+            [
+              75.0,
+              20.0
+            ],
+            [
+              100.0,
+              20.0
+            ],
+            [
+              100.0,
+              0.0
+            ]
+          ],
+          "holes": []
+        }
+      ],
+      "modifier_stl": "provino_modifier_03_135deg.stl",
+      "modifier_bbox": [
+        75.0,
+        -2.0,
+        102.0,
+        22.0
+      ],
+      "modifier_center_offset_from_part_center_mm": [
+        38.5,
+        0.0,
+        0.5
+      ]
+    }
+  ]
+}
