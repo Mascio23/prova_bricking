@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 
 from infill_sectioning import __version__
-from infill_sectioning.bambu3mf import (Volume, build_3mf, infill_settings, pattern_warning,
-                                        read_template, write_3mf)
+from infill_sectioning.bambu3mf import (Volume, build_3mf, infill_settings, pattern_choices,
+                                        pattern_warning, read_template, write_3mf)
 from infill_sectioning.export import build_report, write_json, write_modifier_stls, write_png
 from infill_sectioning.footprint import extract_footprint, load_mesh
 from infill_sectioning.moments import polygon_moments, raster_moments
@@ -61,8 +61,9 @@ def parse_args(argv=None):
                         "affected: they keep the 45/135 alternation")
     p.add_argument("--infill-pattern", default="rectilinear",
                    help="sparse infill pattern of every modifier in the .3mf, as named in "
-                        "Bambu Studio: rectilinear (default), line, aligned-rectilinear, or "
-                        "a raw configuration key")
+                        "the Bambu Studio menu (spaces -> hyphens). Default: rectilinear. "
+                        "Single line direction per layer (best for the 45/135 alternation): "
+                        "rectilinear, line, aligned-rectilinear. Others: " + pattern_choices())
     p.add_argument("--3mf-setting", dest="mod_settings", action="append", default=[],
                    metavar="KEY=VALUE",
                    help="extra per-modifier override written into the .3mf, repeatable "
@@ -74,6 +75,11 @@ def parse_args(argv=None):
 
 
 def run(args) -> dict:
+    if args.export_3mf:  # fail early on a typo, before writing anything
+        try:
+            infill_settings(args.infill_density, args.infill_pattern)
+        except ValueError as exc:
+            raise SystemExit(f"error: {exc}")
     mesh = load_mesh(args.model, step_tolerance=args.step_tolerance)
     part = extract_footprint(mesh, args.footprint)
     z_min, z_max = float(mesh.bounds[0, 2]), float(mesh.bounds[1, 2])

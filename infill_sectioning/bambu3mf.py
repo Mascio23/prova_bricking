@@ -328,27 +328,43 @@ def write_3mf(path: str | Path, files: dict[str, bytes]):
             z.writestr(name, data)
 
 
-# Sparse infill patterns for which "infill direction" does not give one line
-# direction per layer (several directions, curves, or no direction at all):
-# alternating 45/135 between regions then has little or no effect.
-NON_DIRECTIONAL_PATTERNS = {"grid", "triangles", "tri-hexagon", "cubic", "adaptivecubic",
-                            "supportcubic", "quartercubic", "honeycomb", "gyroid",
-                            "lightning", "concentric", "hilbertcurve", "archimedeanchords",
-                            "octagramspiral"}
+# (configuration key, menu name) of every sparse infill pattern of Bambu Studio 2.08,
+# from PrintConfig.cpp. NB: the menu entry "Rectilinear" is stored as "zig-zag".
+PATTERNS = [
+    ("concentric", "Concentric"), ("zig-zag", "Rectilinear"), ("grid", "Grid"),
+    ("line", "Line"), ("cubic", "Cubic"), ("triangles", "Triangles"),
+    ("tri-hexagon", "Tri-hexagon"), ("gyroid", "Gyroid"), ("honeycomb", "Honeycomb"),
+    ("adaptivecubic", "Adaptive Cubic"), ("alignedrectilinear", "Aligned Rectilinear"),
+    ("3dhoneycomb", "3D Honeycomb"), ("hilbertcurve", "Hilbert Curve"),
+    ("archimedeanchords", "Archimedean Chords"), ("octagramspiral", "Octagram Spiral"),
+    ("supportcubic", "Support Cubic"), ("lightning", "Lightning"),
+    ("crosshatch", "Cross Hatch"), ("zigzag", "Zig Zag"), ("crosszag", "Cross Zag"),
+    ("lockedzag", "Locked Zag"), ("2dlattice", "2D Lattice"),
+]
+_KEYS = {k for k, _ in PATTERNS}
 
 
-# Names shown in the Bambu Studio menu -> configuration key (PrintConfig.cpp).
-# NB: the menu entry "Rectilinear" is stored as "zig-zag".
-PATTERN_KEYS = {
-    "rectilinear": "zig-zag", "zig-zag": "zig-zag",
-    "line": "line",
-    "aligned-rectilinear": "alignedrectilinear", "alignedrectilinear": "alignedrectilinear",
-}
+def _slug(label: str) -> str:
+    return re.sub(r"[\s_]+", "-", label.strip().lower())
+
+
+# The menu name "Zig Zag" (key "zigzag") is not accepted as a name: it would be
+# confused with the key "zig-zag", which is the menu entry "Rectilinear".
+_BY_NAME = {_slug(label): k for k, label in PATTERNS if k != "zigzag"}
+
+
+def pattern_choices() -> str:
+    return ", ".join(_slug(label) if k != "zigzag" else "zigzag" for k, label in PATTERNS)
 
 
 def pattern_key(name: str) -> str:
-    """Menu name (e.g. 'rectilinear') or raw key -> Bambu configuration key."""
-    return PATTERN_KEYS.get(name.strip().lower(), name.strip())
+    """Menu name (e.g. 'rectilinear', 'adaptive-cubic') or raw key -> configuration key."""
+    n = name.strip().lower()
+    if n in _KEYS:
+        return n
+    if _slug(n) in _BY_NAME:
+        return _BY_NAME[_slug(n)]
+    raise ValueError(f"unknown infill pattern {name!r}; choose one of: {pattern_choices()}")
 
 
 def infill_settings(density: float, pattern: str = "rectilinear") -> dict[str, str]:
@@ -359,12 +375,22 @@ def infill_settings(density: float, pattern: str = "rectilinear") -> dict[str, s
             "sparse_infill_pattern": pattern_key(pattern)}
 
 
+# Patterns that print ONE line direction per layer, which `infill_direction` rotates.
+SINGLE_DIRECTION_PATTERNS = {"zig-zag", "line", "alignedrectilinear"}
+
+
 def pattern_warning(template: Template | None, modifier_settings: dict) -> str | None:
     pattern = modifier_settings.get("sparse_infill_pattern")
     if pattern is None and template is not None:
         pattern = template.global_settings.get("sparse_infill_pattern")
-    if pattern and pattern.lower() in NON_DIRECTIONAL_PATTERNS:
-        return (f"sparse infill pattern is '{pattern}': it does not print a single line "
-                "direction per layer, so the 45/135 alternation will have little or no "
-                "effect on sparse layers. Consider --3mf-setting sparse_infill_pattern=zig-zag")
-    return None
+    if not pattern or pattern.lower() in SINGLE_DIRECTION_PATTERNS:
+        return None
+    if pattern.lower() == "grid":
+        return ("sparse infill pattern is 'grid': it prints both diagonals on every layer, "
+                "so rotating it by 90 deg gives the same layer and the 45/135 alternation "
+                "has no effect on the sparse layers (checked on a real G-code). "
+                "Use --infill-pattern rectilinear")
+    return (f"sparse infill pattern is '{pattern}': it does not print a single line direction "
+            "per layer, so the effect of the 45/135 alternation on the sparse layers is not "
+            "guaranteed (not verified). Check the preview or the G-code, or use "
+            "--infill-pattern rectilinear")

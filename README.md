@@ -59,7 +59,7 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
 | `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
 | `--infill-density PCT` | 100 | densità dell'infill sparso [%] di ogni modifier nel `.3mf` (0–100) |
-| `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio: `rectilinear`, `line`, `aligned-rectilinear` |
+| `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio (spazi → trattini): vedi la tabella dei pattern più sotto |
 | `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
 | `--no-stl`, `--no-png` | | non scrive gli STL / il PNG |
 
@@ -220,26 +220,78 @@ python section_infill.py provino.stl --out-dir output_20 --export-3mf \
     --template-3mf modello_H2D_PA6.3mf --infill-density 20
 ```
 
-Cosa cambia e cosa no, verificato sui sorgenti di Bambu Studio (`Fill.cpp`):
+Cosa cambia e cosa no, verificato sui sorgenti di Bambu Studio (`Fill.cpp`) e
+sul G-code di un provino reale al 20% (H2D, Bambu Studio 2.08):
 - **Cambia** la densità dell'infill sparso, cioè dei layer intermedi. A 100%
   Bambu non usa più il pattern sparso: tutti i layer sono solidi e seguono il
   pattern "internal solid infill" del template.
 - **Non cambia** la direzione. Infill sparso, solido interno, top e bottom usano
-  tutti la stessa `infill_direction` del modifier, quindi **l'alternanza 45°/135°
-  tra regioni resta identica sia sui layer inferiori e superiori sia su quelli
-  intermedi**. Se l'infill sparso è a linee singole (Rectilinear, Line), le
-  direzioni si invertono a ogni layer in tutte le regioni, e regioni adiacenti
-  restano in opposizione di fase.
+  tutti la stessa `infill_direction` del modifier. Nel G-code del provino al 20%
+  tutti i layer (bottom, solidi interni, sparsi, top) alternano 45°/135° tra
+  regioni adiacenti, e in ogni regione la direzione si inverte a ogni layer.
+- **Un'eccezione, solo con infill sparso:** il **bridge interno**, cioè il primo
+  layer che copre l'infill sparso (layer 15 su 20 nel provino da 4 mm), non
+  segue l'alternanza. Bambu ne sceglie la direzione da solo, a partire dalle
+  linee dell'infill sotto, e `infill_direction` non ci arriva (il parametro
+  `bridge_angle` vale solo per i bridge esterni). Nel G-code di prova il bridge
+  è a 135° in tutte e 4 le regioni. Conta come uno dei 5 layer di top shell
+  e si verifica solo con densità inferiore al 100%.
 - **Non cambia** il numero di layer solidi: `bottom_shell_layers` e
   `top_shell_layers` vengono dal template. Se vuoi più o meno layer solidi,
   cambiali nel template, oppure per i soli modifier con
-  `--3mf-setting top_shell_layers=7`. Con infill sparso, i layer solidi sono le
-  uniche zone dove l'alternanza resta "forte": per un provino di 3–5 mm, che ha
-  3 layer sotto e 5 sopra su 25, è una frazione importante dell'altezza.
+  `--3mf-setting top_shell_layers=7`.
 
-Come sempre, controlla nell'anteprima layer per layer, e conserva densità e
-pattern nel piano DOE: la densità è un fattore a sé, e il confronto fra provino
-sezionato e non sezionato va fatto alla stessa densità.
+Come sempre, conserva densità e pattern nel piano DOE: la densità è un fattore a
+sé, e il confronto fra provino sezionato e non sezionato va fatto alla stessa
+densità.
+
+#### Tornare all'infill pieno (100%)
+
+100% è il valore predefinito, quindi basta non passare l'opzione, oppure
+passarla esplicitamente:
+
+```bash
+python section_infill.py provino.stl --out-dir output_100 --export-3mf \
+    --template-3mf modello_H2D_PA6.3mf --infill-density 100
+```
+
+#### Cambiare il tipo di infill
+
+`--infill-pattern` accetta i nomi del menu di Bambu Studio. Se hai più
+parole, usa i trattini: `--infill-pattern adaptive-cubic`. Un nome sbagliato dà
+un errore con l'elenco dei nomi validi.
+
+| Nome da usare | Menu di Bambu Studio | Direzioni per layer | Effetto dell'alternanza 45°/135° sull'infill sparso |
+|---|---|---|---|
+| `rectilinear` (default) | Rectilinear | una | **verificato** sul G-code: funziona |
+| `line` | Line | una | atteso come Rectilinear, non verificato |
+| `aligned-rectilinear` | Aligned Rectilinear | una, uguale su tutti i layer | atteso, non verificato; la direzione non si inverte tra layer |
+| `grid` | Grid | due (±45° insieme) | **nessun effetto**, verificato sul G-code |
+| `cubic`, `triangles`, `tri-hexagon`, `honeycomb`, `gyroid`, `adaptive-cubic`, `3d-honeycomb`, `support-cubic`, `cross-hatch`, `lightning`, `concentric`, `hilbert-curve`, `archimedean-chords`, `octagram-spiral`, `cross-zag`, `locked-zag`, `2d-lattice` | omonimi | più direzioni, o nessuna direzione preferita | **non garantito e non verificato**. Il programma stampa un avviso |
+| `zigzag` | Zig Zag | pattern "locked" | come sopra, non verificato |
+
+Nota: la voce **Rectilinear** del menu è salvata da Bambu col nome `zig-zag`
+(mentre `Zig Zag` del menu è `zigzag`, un pattern diverso). Il programma gestisce
+la differenza: scrivi `rectilinear`.
+
+Per usare un pattern non verificato, controlla il risultato con il G-code, come
+descritto qui sotto.
+
+#### Verificare il risultato sul G-code
+
+Dopo lo slice, esporta il piatto con **File → Export → Export plate sliced
+file** (`.gcode.3mf`) e lancia:
+
+```bash
+python analyze_gcode.py provino.gcode.3mf output/provino_sections.json
+```
+
+Per ogni layer e ogni regione stampa la direzione dominante delle linee di
+infill e la lunghezza estrusa, poi controlla che le regioni adiacenti siano
+ortogonali su tutti i layer. Esce con codice 0 se tutto è corretto, 1 altrimenti.
+I layer di bridge non vengono controllati, perché la loro direzione è automatica.
+Con Grid, o con un pattern a più direzioni, compare `45+135` nelle celle dei
+layer sparsi e il controllo fallisce.
 
 ### Metodo A: caricare pezzo e modifier insieme come oggetto multi-parte
 
@@ -347,8 +399,10 @@ infill_sectioning/
   sectioning.py                bisezione ricorsiva, nsplit, adiacenza, angoli, modifier
   export.py                    JSON, PNG, STL
   bambu3mf.py                  progetto Bambu Studio (.3mf)
+analyze_gcode.py               controllo delle direzioni di infill nel G-code
 tests/test_sectioning.py       test (pytest)
 tests/test_bambu3mf.py         test dell'export .3mf
+tests/test_analyze_gcode.py    test del controllo sul G-code
 tests/data/                    progetto di riferimento salvato da Bambu Studio
 examples/make_test_parts.py    pezzi di prova procedurali
 ```

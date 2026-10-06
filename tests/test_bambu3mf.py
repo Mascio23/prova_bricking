@@ -225,3 +225,27 @@ def test_pattern_names_and_warning(tmp_path):
 def test_invalid_density(tmp_path, bad):
     with pytest.raises(SystemExit):
         run_cli(tmp_path, "--infill-density", bad)
+
+
+def test_all_menu_patterns_are_accepted():
+    from infill_sectioning.bambu3mf import PATTERNS, pattern_key
+    for key, label in PATTERNS:
+        assert pattern_key(key) == key
+        if key != "zigzag":  # "Zig Zag" would be confused with "zig-zag" (Rectilinear)
+            assert pattern_key(label) == key
+            assert pattern_key(label.lower().replace(" ", "-")) == key
+
+
+def test_pattern_written_to_3mf_and_warnings(tmp_path):
+    g, rep = run_cli(tmp_path, "--infill-density", "15", "--infill-pattern", "Adaptive Cubic")
+    assert modifier_parts(g)[0]["sparse_infill_pattern"] == "adaptivecubic"
+    assert "not verified" in rep["bambu_3mf"]["warning"]
+
+
+def test_unknown_pattern_fails_before_writing(tmp_path):
+    mesh = trimesh.creation.box(extents=[100, 20, 4])
+    mesh.export(tmp_path / "p.stl")
+    with pytest.raises(SystemExit, match="unknown infill pattern"):
+        section_infill.main([str(tmp_path / "p.stl"), "--out-dir", str(tmp_path / "o"),
+                             "--export-3mf", "--infill-pattern", "rettilineo"])
+    assert not (tmp_path / "o").exists()
