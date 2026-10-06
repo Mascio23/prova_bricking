@@ -58,6 +58,8 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--prefix` | nome file | prefisso dei file di output |
 | `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
 | `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
+| `--infill-density PCT` | 100 | densità dell'infill sparso [%] di ogni modifier nel `.3mf` (0–100) |
+| `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio: `rectilinear`, `line`, `aligned-rectilinear` |
 | `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
 | `--no-stl`, `--no-png` | | non scrive gli STL / il PNG |
 
@@ -192,21 +194,52 @@ I test coprono:
 2. Genera il progetto:
    ```bash
    python section_infill.py provino.stl --out-dir output --export-3mf \
-       --template-3mf modello_H2D_PA6.3mf \
-       --3mf-setting sparse_infill_pattern=zig-zag --3mf-setting sparse_infill_density=100%
+       --template-3mf modello_H2D_PA6.3mf --infill-density 100
    ```
-   Ogni modifier riceve `infill_direction` (45 o 135) più gli override passati
-   con `--3mf-setting`. Le chiavi sono quelle di configurazione di Bambu Studio,
-   per esempio `sparse_infill_pattern`, `sparse_infill_density`,
-   `infill_direction`. Senza `--template-3mf` il progetto non contiene
+   Ogni modifier riceve `infill_direction` (45 o 135), la densità e il pattern
+   dell'infill sparso (`--infill-density`, `--infill-pattern`) e gli eventuali
+   override passati con `--3mf-setting`, che prevalgono sul resto. Le chiavi sono
+   quelle di configurazione di Bambu Studio, per esempio `infill_direction` o
+   `top_shell_layers`. Senza `--template-3mf` il progetto non contiene
    impostazioni di stampa e Bambu Studio usa i preset selezionati in quel momento.
 3. Apri `output/provino.3mf` in Bambu Studio (File → Open Project).
 4. Controlla nella lista oggetti che le parti `…_modifier_XX_…` abbiano l'icona
    dei **modifier**, e che ognuna mostri l'override della direzione. Poi fai lo
    slice e controlla l'anteprima.
 
-Il programma avvisa se il pattern di infill sparso in uso (quello del template o
-del `--3mf-setting`) non stampa una sola direzione per layer, per esempio Grid.
+Il programma avvisa se il pattern di infill sparso in uso non stampa una sola
+direzione per layer, per esempio Grid.
+
+#### Infill pieno (100%) oppure ridotto (x%)
+
+Per passare dal provino pieno a uno con infill sparso al 20%, cambia solo
+`--infill-density`:
+
+```bash
+python section_infill.py provino.stl --out-dir output_20 --export-3mf \
+    --template-3mf modello_H2D_PA6.3mf --infill-density 20
+```
+
+Cosa cambia e cosa no, verificato sui sorgenti di Bambu Studio (`Fill.cpp`):
+- **Cambia** la densità dell'infill sparso, cioè dei layer intermedi. A 100%
+  Bambu non usa più il pattern sparso: tutti i layer sono solidi e seguono il
+  pattern "internal solid infill" del template.
+- **Non cambia** la direzione. Infill sparso, solido interno, top e bottom usano
+  tutti la stessa `infill_direction` del modifier, quindi **l'alternanza 45°/135°
+  tra regioni resta identica sia sui layer inferiori e superiori sia su quelli
+  intermedi**. Se l'infill sparso è a linee singole (Rectilinear, Line), le
+  direzioni si invertono a ogni layer in tutte le regioni, e regioni adiacenti
+  restano in opposizione di fase.
+- **Non cambia** il numero di layer solidi: `bottom_shell_layers` e
+  `top_shell_layers` vengono dal template. Se vuoi più o meno layer solidi,
+  cambiali nel template, oppure per i soli modifier con
+  `--3mf-setting top_shell_layers=7`. Con infill sparso, i layer solidi sono le
+  uniche zone dove l'alternanza resta "forte": per un provino di 3–5 mm, che ha
+  3 layer sotto e 5 sopra su 25, è una frazione importante dell'altezza.
+
+Come sempre, controlla nell'anteprima layer per layer, e conserva densità e
+pattern nel piano DOE: la densità è un fattore a sé, e il confronto fra provino
+sezionato e non sezionato va fatto alla stessa densità.
 
 ### Metodo A: caricare pezzo e modifier insieme come oggetto multi-parte
 

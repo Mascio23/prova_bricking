@@ -337,6 +337,28 @@ NON_DIRECTIONAL_PATTERNS = {"grid", "triangles", "tri-hexagon", "cubic", "adapti
                             "octagramspiral"}
 
 
+# Names shown in the Bambu Studio menu -> configuration key (PrintConfig.cpp).
+# NB: the menu entry "Rectilinear" is stored as "zig-zag".
+PATTERN_KEYS = {
+    "rectilinear": "zig-zag", "zig-zag": "zig-zag",
+    "line": "line",
+    "aligned-rectilinear": "alignedrectilinear", "alignedrectilinear": "alignedrectilinear",
+}
+
+
+def pattern_key(name: str) -> str:
+    """Menu name (e.g. 'rectilinear') or raw key -> Bambu configuration key."""
+    return PATTERN_KEYS.get(name.strip().lower(), name.strip())
+
+
+def infill_settings(density: float, pattern: str = "rectilinear") -> dict[str, str]:
+    """Per-modifier sparse infill overrides for a density in percent (0-100)."""
+    if not 0 <= density <= 100:
+        raise ValueError(f"infill density must be between 0 and 100 %, got {density:g}")
+    return {"sparse_infill_density": f"{density:g}%",
+            "sparse_infill_pattern": pattern_key(pattern)}
+
+
 def pattern_warning(template: Template | None, modifier_settings: dict) -> str | None:
     pattern = modifier_settings.get("sparse_infill_pattern")
     if pattern is None and template is not None:

@@ -160,3 +160,68 @@ def test_lib3mf_can_read_it(generated):
     while it.MoveNext():
         kinds.append(it.GetCurrentObject().IsMeshObject())
     assert kinds == [True] * 5 + [False]
+
+
+# --------------------------------------------------------------------------- #
+# --infill-density / --infill-pattern
+# --------------------------------------------------------------------------- #
+def run_cli(tmp_path, *extra):
+    mesh = trimesh.creation.box(extents=[100, 20, 4])
+    mesh.apply_translation([50, 10, 2])
+    mesh.export(tmp_path / "p.stl")
+    out = tmp_path / "o"
+    section_infill.main([str(tmp_path / "p.stl"), "--out-dir", str(out), "--export-3mf",
+                         "--template-3mf", str(REF), *extra])
+    return read_3mf(out / "p.3mf"), json.loads((out / "p_sections.json").read_text())
+
+
+def modifier_parts(g):
+    return [g["parts"][k] for k in "2345"]
+
+
+def test_default_is_solid_rectilinear(tmp_path):
+    g, _ = run_cli(tmp_path)
+    for m, angle in zip(modifier_parts(g), ["45", "135", "45", "135"]):
+        assert m["sparse_infill_density"] == "100%"
+        assert m["sparse_infill_pattern"] == "zig-zag"  # Bambu's "Rectilinear"
+        assert m["infill_direction"] == angle
+
+
+def test_sparse_density_keeps_directions(tmp_path):
+    g, rep = run_cli(tmp_path, "--infill-density", "20")
+    for m, angle in zip(modifier_parts(g), ["45", "135", "45", "135"]):
+        assert m["sparse_infill_density"] == "20%"
+        assert m["skeleton_infill_density"] == m["skin_infill_density"] == "20%"
+        assert m["sparse_infill_pattern"] == "zig-zag"
+        assert m["infill_direction"] == angle  # shells + sparse share this key
+    # the number of solid layers is NOT touched: it comes from the template
+    assert all("top_shell_layers" not in m and "bottom_shell_layers" not in m
+               for m in modifier_parts(g))
+    assert "infill_direction" not in g["parts"]["1"]
+    assert rep["bambu_3mf"]["modifier_settings"]["sparse_infill_density"] == "20%"
+    assert rep["bambu_3mf"]["warning"] is None
+
+
+def test_3mf_setting_overrides_infill_options(tmp_path):
+    g, _ = run_cli(tmp_path, "--infill-density", "20", "--3mf-setting",
+                   "sparse_infill_density=30%", "--3mf-setting", "top_shell_layers=7")
+    for m in modifier_parts(g):
+        assert m["sparse_infill_density"] == "30%"
+        assert m["top_shell_layers"] == "7"
+
+
+def test_pattern_names_and_warning(tmp_path):
+    from infill_sectioning.bambu3mf import infill_settings, pattern_key
+    assert pattern_key("Rectilinear") == "zig-zag"
+    assert pattern_key("line") == "line"
+    assert pattern_key("aligned-rectilinear") == "alignedrectilinear"
+    assert infill_settings(15.5)["sparse_infill_density"] == "15.5%"
+    g, rep = run_cli(tmp_path, "--infill-density", "15", "--infill-pattern", "grid")
+    assert modifier_parts(g)[0]["sparse_infill_pattern"] == "grid"
+    assert "grid" in rep["bambu_3mf"]["warning"]
+
+
+@pytest.mark.parametrize("bad", ["-1", "101"])
+def test_invalid_density(tmp_path, bad):
+    with pytest.raises(SystemExit):
+        run_cli(tmp_path, "--infill-density", bad)

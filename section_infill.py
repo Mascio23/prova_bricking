@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 from infill_sectioning import __version__
-from infill_sectioning.bambu3mf import Volume, build_3mf, pattern_warning, read_template, write_3mf
+from infill_sectioning.bambu3mf import (Volume, build_3mf, infill_settings, pattern_warning,
+                                        read_template, write_3mf)
 from infill_sectioning.export import build_report, write_json, write_modifier_stls, write_png
 from infill_sectioning.footprint import extract_footprint, load_mesh
 from infill_sectioning.moments import polygon_moments, raster_moments
@@ -54,6 +55,14 @@ def parse_args(argv=None):
     p.add_argument("--template-3mf", type=Path, default=None,
                    help="Bambu Studio project (.3mf, File > Save Project) whose printer/"
                         "filament/process settings are copied into the exported .3mf")
+    p.add_argument("--infill-density", type=float, default=100.0, metavar="PCT",
+                   help="sparse infill density [%%] of every modifier in the .3mf "
+                        "(default 100 = fully solid). The top/bottom solid layers are not "
+                        "affected: they keep the 45/135 alternation")
+    p.add_argument("--infill-pattern", default="rectilinear",
+                   help="sparse infill pattern of every modifier in the .3mf, as named in "
+                        "Bambu Studio: rectilinear (default), line, aligned-rectilinear, or "
+                        "a raw configuration key")
     p.add_argument("--3mf-setting", dest="mod_settings", action="append", default=[],
                    metavar="KEY=VALUE",
                    help="extra per-modifier override written into the .3mf, repeatable "
@@ -140,7 +149,11 @@ def parse_settings(items) -> dict:
 
 
 def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
-    extra = parse_settings(args.mod_settings)
+    try:
+        extra = {**infill_settings(args.infill_density, args.infill_pattern),
+                 **parse_settings(args.mod_settings)}  # --3mf-setting wins
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}")
     template = read_template(args.template_3mf) if args.template_3mf else None
     part_name = args.model.with_suffix(".stl").name
     volumes = [Volume(part_name, mesh, "normal_part")]
@@ -155,6 +168,11 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         print("WARNING: large project (many modifiers or triangles): Bambu Studio may "
               "take a long time to open it. Consider larger --max-area / --max-ar or a "
               "lighter mesh.")
+    print(f"3mf: sparse infill {extra['sparse_infill_density']} "
+          f"{extra['sparse_infill_pattern']} in every modifier; solid layers = "
+          f"{template.global_settings.get('bottom_shell_layers', '?') if template else '?'} bottom / "
+          f"{template.global_settings.get('top_shell_layers', '?') if template else '?'} top "
+          "(from the template), same 45/135 direction as the sparse infill")
     warning = pattern_warning(template, extra)
     if warning:
         print("WARNING:", warning)
