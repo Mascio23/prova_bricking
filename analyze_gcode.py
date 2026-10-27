@@ -3,8 +3,12 @@
 
 Reads a sliced Bambu Studio file (.gcode or .gcode.3mf) and the *_sections.json
 written by section_infill.py, and reports, for every region and layer, the
-dominant direction of the infill lines. Adjacent regions must differ by 90 deg
-(45 vs 135) on every layer for the sectioning to work as intended.
+dominant direction of the infill lines. Two things are checked:
+
+1. adjacent regions print orthogonal infill (45 vs 135) on every layer;
+2. the direction relative to the part is the configured one (45 or 135, or the
+   same plus 90 on the alternate layers), whatever the rotation of the part on
+   the plate (the infill direction in Bambu Studio refers to the plate).
 
 Example:
     python analyze_gcode.py provino.gcode.3mf output/provino_sections.json
@@ -21,6 +25,8 @@ import sys
 import zipfile
 from pathlib import Path
 
+import numpy as np
+from shapely import affinity
 from shapely.geometry import Point, shape
 from shapely.prepared import prep
 
@@ -45,15 +51,45 @@ def read_gcode(path: Path):
     return path.read_text(encoding="utf-8", errors="replace").splitlines(), None
 
 
-def dominant(angles: collections.Counter, total: float):
-    """'45' if one direction dominates, '45+135' if two do, '' if there is no data."""
-    keep = [(a, v) for a, v in angles.most_common() if v >= 0.25 * angles.most_common(1)[0][1]]
-    return "+".join(str(a) for a, _ in keep)
+def circ_dist(a: float, b: float) -> float:
+    """Distance between two directions (mod 180 deg)."""
+    d = (a - b) % 180.0
+    return min(d, 180.0 - d)
 
 
-def analyze(lines, regions, offset):
+def clusters(segments, width: float = 6.0, min_share: float = 0.25):
+    """Dominant line directions from [(angle_deg mod 180, length_mm)].
+
+    Returns [(centre_deg, length_mm)], longest first. A second direction is
+    reported only if it carries at least `min_share` of the first one (e.g. both
+    diagonals of Grid); shorter ones (connections between lines) are ignored."""
+    if not segments:
+        return []
+    ang = np.array([a for a, _ in segments])
+    ln = np.array([w for _, w in segments])
+    out = []
+    while len(ang):
+        hist = np.zeros(180)
+        np.add.at(hist, np.round(ang).astype(int) % 180, ln)
+        smooth = sum(np.roll(hist, k) for k in range(-3, 4))
+        peak = float(np.argmax(smooth))
+        near = np.array([circ_dist(a, peak) <= width for a in ang])
+        w = ln[near]
+        if not len(w) or (out and w.sum() < min_share * out[0][1]):
+            break
+        z = np.sum(w * np.exp(2j * np.radians(ang[near])))
+        out.append((float(np.degrees(np.angle(z)) / 2 % 180), float(w.sum())))
+        ang, ln = ang[~near], ln[~near]
+    return out
+
+
+def fmt(cl) -> str:
+    return "+".join(f"{round(c, 1):g}" for c, _ in cl)
+
+
+def analyze(lines, regions):
     polys = [prep(r["geom"]) for r in regions]
-    stats = collections.defaultdict(collections.Counter)  # (layer, feat, region) -> angle -> mm
+    segs = collections.defaultdict(list)  # (layer, feat, region) -> [(angle, mm)]
     x = y = 0.0
     feat, layer = None, -1
     for line in lines:
@@ -68,14 +104,33 @@ def analyze(lines, regions, offset):
             if me and float(me.group(1)) > 0 and feat in FEATURES:
                 length = math.hypot(nx - x, ny - y)
                 if length > 1.0:
-                    mid = Point((x + nx) / 2 - offset[0], (y + ny) / 2 - offset[1])
-                    ang = round(math.degrees(math.atan2(ny - y, nx - x)) % 180) % 180
+                    mid = Point((x + nx) / 2, (y + ny) / 2)
+                    ang = math.degrees(math.atan2(ny - y, nx - x)) % 180
                     for i, pp in enumerate(polys):
                         if pp.contains(mid):
-                            stats[(layer, feat, i)][ang] += length
+                            segs[(layer, feat, i)].append((ang, length))
                             break
             x, y = nx, ny
-    return stats
+    return segs
+
+
+def to_plate(geom, placement, offset, rotation, part_bbox, plate_bbox):
+    """Move a region polygon from the model frame to the plate frame."""
+    if offset is not None:
+        g = affinity.rotate(geom, rotation, origin=(0, 0)) if rotation else geom
+        return affinity.translate(g, *offset)
+    if placement:
+        ox, oy = placement["object_origin_xy"]
+        tx, ty = placement["plate_position_xy"]
+        g = affinity.translate(geom, -ox, -oy)
+        g = affinity.rotate(g, placement["plate_rotation_deg"], origin=(0, 0))
+        return affinity.translate(g, tx, ty)
+    # no recorded placement: rotate about the centre of the part's bounding box and
+    # put the centre of the (rotated) part on the centre of the plate bounding box
+    cx, cy = (part_bbox[0] + part_bbox[2]) / 2, (part_bbox[1] + part_bbox[3]) / 2
+    g = affinity.rotate(geom, rotation, origin=(cx, cy))
+    px, py = (plate_bbox[0] + plate_bbox[2]) / 2, (plate_bbox[1] + plate_bbox[3]) / 2
+    return affinity.translate(g, px - cx, py - cy)
 
 
 def main(argv=None) -> int:
@@ -83,64 +138,96 @@ def main(argv=None) -> int:
     ap.add_argument("gcode", type=Path, help=".gcode or .gcode.3mf from Bambu Studio")
     ap.add_argument("sections_json", type=Path, help="*_sections.json from section_infill.py")
     ap.add_argument("--offset", type=float, nargs=2, metavar=("DX", "DY"),
-                    help="translation model -> plate [mm]; default: from the object "
-                         "bounding box stored in the .gcode.3mf")
+                    help="translation model -> plate [mm] (applied after --rotation about "
+                         "the model origin); default: from the placement recorded in the JSON")
+    ap.add_argument("--rotation", type=float, default=None, metavar="DEG",
+                    help="rotation of the part on the plate (counter-clockwise, deg); default: "
+                         "the one recorded in the JSON, else 0. For a part rotated by hand "
+                         "in Bambu Studio: assumes rotation about the centre of a part "
+                         "that is symmetric (e.g. a rectangle)")
     ap.add_argument("--tolerance", type=float, default=5.0,
-                    help="allowed deviation from the expected 90 deg difference [deg]")
+                    help="allowed deviation of the line direction [deg]")
     args = ap.parse_args(argv)
 
     rep = json.loads(args.sections_json.read_text())
-    regions = [{"id": r["id"], "angle": r["infill_angle_deg"], "neighbors": r["neighbors"],
-                "geom": shape({"type": "MultiPolygon", "coordinates": [
-                    [p["exterior"]] + p["holes"] for p in r["polygon"]]})}
-               for r in rep["regions"]]
-    lines, plate = read_gcode(args.gcode)
-    if args.offset:
-        offset = tuple(args.offset)
-    elif plate:
-        pb = rep["part"]["bbox"]
-        offset = (plate[0] - pb[0], plate[1] - pb[1])
-    else:
-        sys.exit("error: give --offset DX DY (model -> plate translation)")
+    placement = (rep.get("bambu_3mf") or {}).get("placement")
+    rotation = args.rotation if args.rotation is not None else (
+        placement["plate_rotation_deg"] if placement else 0.0)
+    lines, plate_bbox = read_gcode(args.gcode)
+    if args.rotation is not None or args.offset is not None:
+        placement = None  # explicit values given: do not mix them with the recorded ones
+    if args.offset is None and placement is None and plate_bbox is None:
+        sys.exit("error: no placement in the JSON and no bounding box in the file: "
+                 "give --offset DX DY (and --rotation)")
+    part_bbox = rep["part"]["bbox"]
 
-    stats = analyze(lines, regions, offset)
+    regions = []
+    for r in rep["regions"]:
+        g = shape({"type": "MultiPolygon", "coordinates": [
+            [p["exterior"]] + p["holes"] for p in r["polygon"]]})
+        regions.append({"id": r["id"], "angle": r["infill_angle_deg"],
+                        "neighbors": r["neighbors"],
+                        "geom": to_plate(g, placement, args.offset, rotation, part_bbox,
+                                         plate_bbox)})
+    segs = analyze(lines, regions)
+
     n = len(regions)
-    print("region angle set in the project: " + "  ".join(
-        f"R{r['id']}={r['angle']:g}" for r in regions))
-    print(f"\n{'layer':>5} {'feature':<22}" + "".join(f"{'R' + str(i):>16}" for i in range(n)))
-    bad, checked, auto_layers = [], 0, set()
-    for L, f in sorted({(k[0], k[1]) for k in stats}):
-        row, dom = [], {}
+    print("part rotation on the plate: "
+          f"{rotation:g} deg;  angles relative to the part: " + "  ".join(
+              f"R{r['id']}={r['angle']:g}" for r in regions))
+    print(f"\n{'layer':>5} {'feature':<22}" + "".join(f"{'R' + str(i):>18}" for i in range(n)))
+    ortho_bad, rel_bad, checked, pairs = [], [], 0, 0
+    auto_layers = set()
+    for L, f in sorted({(k[0], k[1]) for k in segs}):
+        cells, dom = [], {}
         for i in range(n):
-            c = stats.get((L, f, i))
-            if c:
-                d = dominant(c, sum(c.values()))
-                dom[i] = d
-                row.append(f"{d} ({sum(c.values()):.0f}mm)")
+            s = segs.get((L, f, i))
+            if s:
+                cl = clusters(s)
+                dom[i] = cl
+                cells.append(f"{fmt(cl)} ({sum(w for _, w in s):.0f}mm)")
             else:
-                row.append("-")
-        print(f"{L:>5} {f:<22}" + "".join(f"{c:>16}" for c in row))
+                cells.append("-")
+        print(f"{L:>5} {f:<22}" + "".join(f"{c:>18}" for c in cells))
         if f in AUTOMATIC:
             auto_layers.add(L)
             continue
         for r in regions:
+            cl = dom.get(r["id"])
+            if cl:
+                checked += 1
+                ok = len(cl) == 1 and any(
+                    circ_dist(cl[0][0] - rotation, r["angle"] + k) <= args.tolerance
+                    for k in (0, 90))
+                if not ok:
+                    rel_bad.append((L, f, r["id"], fmt(cl)))
             for j in r["neighbors"]:
-                if j > r["id"] and r["id"] in dom and j in dom:
-                    checked += 1
+                if j > r["id"] and cl and dom.get(j):
+                    pairs += 1
                     a, b = dom[r["id"]], dom[j]
-                    ok = ("+" not in a and "+" not in b and
-                          abs(((int(a) - int(b) + 90) % 180) - 90) >= 90 - args.tolerance)
-                    if not ok:
-                        bad.append((L, f, r["id"], j, a, b))
+                    if not (len(a) == 1 and len(b) == 1 and
+                            circ_dist(a[0][0] - b[0][0], 90) <= args.tolerance):
+                        ortho_bad.append((L, f, r["id"], j, fmt(a), fmt(b)))
 
-    print(f"\nadjacent region pairs checked: {checked}  (layers with automatic bridge "
-          f"direction, not checked: {sorted(auto_layers) or 'none'})")
-    if bad:
-        print(f"NOT ORTHOGONAL in {len(bad)} cases, e.g. layer {bad[0][0]} {bad[0][1]}: "
-              f"R{bad[0][2]}={bad[0][4]} vs R{bad[0][3]}={bad[0][5]}")
-        print("  ('45+135' = both directions on the same layer, e.g. Grid: no alternation)")
+    print(f"\nlayers with automatic bridge direction, not checked: {sorted(auto_layers) or 'none'}")
+    print(f"adjacent region pairs checked: {pairs};  region-layers checked against the "
+          f"configured angle: {checked}")
+    if ortho_bad:
+        e = ortho_bad[0]
+        print(f"NOT ORTHOGONAL in {len(ortho_bad)} cases, e.g. layer {e[0]} {e[1]}: "
+              f"R{e[2]}={e[4]} vs R{e[3]}={e[5]}")
+        print("  ('a+b' = two directions on the same layer, e.g. Grid: no alternation)")
+    if rel_bad:
+        e = rel_bad[0]
+        print(f"WRONG DIRECTION RELATIVE TO THE PART in {len(rel_bad)} cases, e.g. layer "
+              f"{e[0]} {e[1]} R{e[2]}: printed {e[3]}, expected "
+              f"{(next(r['angle'] for r in regions if r['id'] == e[2]) + rotation) % 180:g} or "
+              f"{(next(r['angle'] for r in regions if r['id'] == e[2]) + rotation + 90) % 180:g} "
+              "on the plate")
+    if ortho_bad or rel_bad:
         return 1
-    print("OK: adjacent regions print orthogonal infill on every checked layer")
+    print("OK: adjacent regions print orthogonal infill, at the configured angle relative "
+          "to the part, on every checked layer")
     return 0
 
 

@@ -249,3 +249,68 @@ def test_unknown_pattern_fails_before_writing(tmp_path):
         section_infill.main([str(tmp_path / "p.stl"), "--out-dir", str(tmp_path / "o"),
                              "--export-3mf", "--infill-pattern", "rettilineo"])
     assert not (tmp_path / "o").exists()
+
+
+# --------------------------------------------------------------------------- #
+# --plate-rotation
+# --------------------------------------------------------------------------- #
+def item_transform(g):
+    return [float(v) for v in g["item"].split()]
+
+
+@pytest.mark.parametrize("rot", [30.0, 42.4, 100.0, 180.0])
+def test_plate_rotation_turns_object_and_angles(tmp_path, rot):
+    import math
+    g, rep = run_cli(tmp_path, "--plate-rotation", f"{rot:g}")
+    m = item_transform(g)
+    c, s_ = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+    # 3MF 3x4: image of X axis, image of Y axis, image of Z axis, translation
+    assert m[0:3] == pytest.approx([c, s_, 0], abs=1e-6)
+    assert m[3:6] == pytest.approx([-s_, c, 0], abs=1e-6)
+    assert m[6:9] == pytest.approx([0, 0, 1])
+    assert m[9:11] == pytest.approx([175, 160])  # still centred on the plate
+    for part, rel in zip(modifier_parts(g), [45, 135, 45, 135]):
+        assert float(part["infill_direction"]) == pytest.approx((rel + rot) % 180, abs=1e-5)
+    # angles relative to the part are unchanged in the report
+    assert [r["infill_angle_deg"] for r in rep["regions"]] == [45, 135, 45, 135]
+    assert [r["plate_angle_deg"] for r in rep["regions"]] == pytest.approx(
+        [(a + rot) % 180 for a in (45, 135, 45, 135)], abs=1e-5)
+    assert rep["bambu_3mf"]["placement"]["plate_rotation_deg"] == rot
+    assert rep["bambu_3mf"]["placement"]["plate_position_xy"] == [175.0, 160.0]
+
+
+def test_zero_rotation_is_unchanged(tmp_path):
+    g, rep = run_cli(tmp_path)
+    assert item_transform(g)[:9] == [1, 0, 0, 0, 1, 0, 0, 0, 1]
+    assert [float(p["infill_direction"]) for p in modifier_parts(g)] == [45, 135, 45, 135]
+    assert [r["plate_angle_deg"] for r in rep["regions"]] == [45, 135, 45, 135]
+
+
+def test_rotated_3mf_geometry_read_back_with_lib3mf(tmp_path):
+    lib3mf = pytest.importorskip("lib3mf")
+    import math
+    mesh = trimesh.creation.box(extents=[100, 20, 4])
+    mesh.apply_translation([50, 10, 2])
+    mesh.export(tmp_path / "p.stl")
+    section_infill.main([str(tmp_path / "p.stl"), "--out-dir", str(tmp_path / "o"),
+                         "--export-3mf", "--template-3mf", str(REF), "--plate-rotation", "45"])
+    w = lib3mf.get_wrapper()
+    model = w.CreateModel()
+    reader = model.QueryReader("3mf")
+    reader.SetStrictModeActive(False)
+    reader.ReadFromFile(str(tmp_path / "o" / "p.3mf"))
+    items = model.GetBuildItems()
+    assert items.MoveNext()
+    fields = items.GetCurrent().GetObjectTransform().Fields
+    # row vector convention of the 3MF spec: the X axis goes to (cos, sin, 0)
+    assert fields[0][:2] == pytest.approx([math.cos(math.pi / 4), math.sin(math.pi / 4)], abs=1e-6)
+
+
+def test_plate_fit_warning():
+    from infill_sectioning.bambu3mf import Volume, plate_fit_warning
+    t = read_template(REF)  # H2D 350 x 320
+    box = trimesh.creation.box(extents=[330, 20, 4])
+    vols = [Volume("p.stl", box, "normal_part")]
+    assert plate_fit_warning(vols, t, 0.0) is None
+    assert "beyond the printable area" in plate_fit_warning(vols, t, 90.0)
+    assert plate_fit_warning(vols, None, 90.0) is None

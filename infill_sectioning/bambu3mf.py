@@ -94,6 +94,7 @@ class Template:
     project_settings: bytes | None = None
     application: str = DEFAULT_APP
     plate_center: tuple[float, float] = DEFAULT_PLATE_CENTER
+    plate_bounds: tuple[float, float, float, float] | None = None  # xmin, ymin, xmax, ymax
     extruder: str = "1"
     global_settings: dict = field(default_factory=dict)
     # <plate> metadata of the template (e.g. filament_map_mode / filament_maps,
@@ -150,10 +151,17 @@ def read_template(path: str | Path) -> Template:
     if area:
         pts = np.array([[float(v) for v in p.split("x")] for p in area])
         t.plate_center = tuple(float(v) for v in (pts.min(0) + pts.max(0)) / 2)
+        t.plate_bounds = (*(float(v) for v in pts.min(0)), *(float(v) for v in pts.max(0)))
     return t
 
 
-def _thumbnail(volumes: list[Volume], size: int) -> bytes:
+def _rot2(deg: float) -> np.ndarray:
+    """2x2 matrix rotating column vectors counter-clockwise (seen from above)."""
+    c, s_ = np.cos(np.radians(deg)), np.sin(np.radians(deg))
+    return np.array([[c, -s_], [s_, c]])
+
+
+def _thumbnail(volumes: list[Volume], size: int, rotation_deg: float = 0.0) -> bytes:
     """Top view of the model parts (grey on transparent), like Bambu's plate_1.png."""
     import io
 
@@ -168,10 +176,11 @@ def _thumbnail(volumes: list[Volume], size: int) -> bytes:
     ax.set_axis_off()
     parts = [v for v in volumes if v.subtype == "normal_part"]
     tris = np.concatenate([v.mesh.triangles[:, :, :2] for v in parts])
+    tris = tris @ _rot2(rotation_deg).T  # rotation about the origin; the view is re-centred below
     ax.add_collection(PolyCollection(tris, facecolors="#9a9a9a", edgecolors="#9a9a9a", linewidths=0.3))
-    b = np.array([v.mesh.bounds for v in parts])
-    c = (b[:, 0, :2].min(0) + b[:, 1, :2].max(0)) / 2
-    r = 0.55 * (b[:, 1, :2].max(0) - b[:, 0, :2].min(0)).max()
+    lo, hi = tris.min(axis=(0, 1)), tris.max(axis=(0, 1))
+    c = (lo + hi) / 2
+    r = 0.55 * (hi - lo).max()
     ax.set_xlim(c[0] - r, c[0] + r)
     ax.set_ylim(c[1] - r, c[1] + r)
     ax.set_aspect("equal")
@@ -200,6 +209,52 @@ def _t3(t) -> str:
     return "1 0 0 0 1 0 0 0 1 " + " ".join(_f(v) for v in t)
 
 
+def _t3r(rotation_deg: float, t) -> str:
+    """3MF 3x4 transform: rotation about Z (counter-clockwise seen from above) + translation.
+
+    3MF lists the matrix by rows of the row-vector convention; Bambu Studio reads
+    the 12 numbers into the columns of its 4x4 matrix (bbs_get_transform_from_3mf_specs_string),
+    so the first triple is the image of the X axis: (cos, sin, 0) for a CCW rotation.
+    """
+    c, s_ = np.cos(np.radians(rotation_deg)), np.sin(np.radians(rotation_deg))
+    c, s_ = (0.0 if abs(v) < 1e-12 else v for v in (c, s_))
+    rot = [c, s_, 0, -s_, c, 0, 0, 0, 1]
+    return " ".join(_f(v) for v in rot) + " " + " ".join(_f(v) for v in t)
+
+
+def placement(volumes: list[Volume], template: Template | None = None,
+              rotation_deg: float = 0.0) -> dict:
+    """Where the model ends up on the plate: p_plate = R(rotation) (p_model - origin) + position.
+
+    origin is the centre of the bounding box of all volumes (the object origin used
+    in the .3mf); position is the plate centre of the template."""
+    t = template or Template()
+    all_b = np.array([v.mesh.bounds for v in volumes])
+    origin = (all_b[:, 0].min(0) + all_b[:, 1].max(0)) / 2
+    return {"object_origin_xy": [round(float(origin[0]), 6), round(float(origin[1]), 6)],
+            "plate_position_xy": [round(float(t.plate_center[0]), 6),
+                                  round(float(t.plate_center[1]), 6)],
+            "plate_rotation_deg": float(rotation_deg)}
+
+
+def plate_fit_warning(volumes: list[Volume], template: Template | None,
+                      rotation_deg: float = 0.0) -> str | None:
+    """Warn if the rotated part (not the modifiers) leaves the printable area."""
+    if template is None or template.plate_bounds is None:
+        return None
+    pl = placement(volumes, template, rotation_deg)
+    o, pos = np.array(pl["object_origin_xy"]), np.array(pl["plate_position_xy"])
+    parts = [v for v in volumes if v.subtype == "normal_part"]
+    pts = np.concatenate([v.mesh.vertices[:, :2] for v in parts])
+    q = (pts - o) @ _rot2(rotation_deg).T + pos
+    x0, y0, x1, y1 = template.plate_bounds
+    if q[:, 0].min() < x0 or q[:, 0].max() > x1 or q[:, 1].min() < y0 or q[:, 1].max() > y1:
+        return (f"the part rotated by {rotation_deg:g} deg extends beyond the printable area "
+                f"({x1 - x0:g} x {y1 - y0:g} mm): x {q[:, 0].min():.1f}..{q[:, 0].max():.1f}, "
+                f"y {q[:, 1].min():.1f}..{q[:, 1].max():.1f}")
+    return None
+
+
 def _m4(t) -> str:
     """Bambu 'matrix' metadata: 4x4 row-major."""
     x, y, z = (_f(v) for v in t)
@@ -207,8 +262,13 @@ def _m4(t) -> str:
 
 
 def build_3mf(volumes: list[Volume], object_name: str,
-              template: Template | None = None) -> dict[str, bytes]:
-    """Return the archive content {path: bytes}. volumes[0] should be the part."""
+              template: Template | None = None, rotation_deg: float = 0.0) -> dict[str, bytes]:
+    """Return the archive content {path: bytes}. volumes[0] should be the part.
+
+    rotation_deg rotates the whole object (part and modifiers) about the vertical axis
+    through its origin, counter-clockwise seen from above. NB: Bambu Studio's infill
+    direction refers to the plate, so the caller must add the rotation to the
+    modifiers' infill_direction to keep the angles relative to the part."""
     t = template or Template()
     n = len(volumes)
     obj_id = n + 1
@@ -254,7 +314,7 @@ def build_3mf(volumes: list[Volume], object_name: str,
         "   <components>\n" + comp_xml + "   </components>\n  </object>\n </resources>\n"
         ' <build p:UUID="2c7c17d8-22b5-4d84-8835-1976022ea369">\n'
         f'  <item objectid="{obj_id}" p:UUID="{obj_id:08x}-b1ec-4553-aec9-835e5b724bb4" '
-        f'transform="{_t3(item_t)}" printable="1"/>\n </build>\n</model>\n')
+        f'transform="{_t3r(rotation_deg, item_t)}" printable="1"/>\n </build>\n</model>\n')
 
     # Metadata/model_settings.config: part types and per-part settings
     total_faces = sum(len(v.mesh.faces) for v in volumes)
@@ -316,8 +376,8 @@ def build_3mf(volumes: list[Volume], object_name: str,
     if t.project_settings is not None:
         files["Metadata/project_settings.config"] = t.project_settings
     files["Metadata/cut_information.xml"] = CUT_INFO.encode()
-    files["Metadata/plate_1.png"] = _thumbnail(volumes, 512)
-    files["Metadata/plate_1_small.png"] = _thumbnail(volumes, 128)
+    files["Metadata/plate_1.png"] = _thumbnail(volumes, 512, rotation_deg)
+    files["Metadata/plate_1_small.png"] = _thumbnail(volumes, 128, rotation_deg)
     files.update(t.aux_files)
     return files
 

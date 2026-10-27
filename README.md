@@ -58,6 +58,7 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--prefix` | nome file | prefisso dei file di output |
 | `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
 | `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
+| `--plate-rotation DEG` | 0 | ruota il pezzo e i modifier di DEG gradi sul piatto (antiorario visto dall'alto) e somma DEG agli angoli: gli angoli **rispetto al pezzo** restano 45°/135° (vedi "Pezzo ruotato sul piatto") |
 | `--infill-density PCT` | 100 | densità dell'infill sparso [%] di ogni modifier nel `.3mf` (0–100) |
 | `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio (spazi → trattini): vedi la tabella dei pattern più sotto |
 | `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
@@ -277,6 +278,46 @@ la differenza: scrivi `rectilinear`.
 Per usare un pattern non verificato, controlla il risultato con il G-code, come
 descritto qui sotto.
 
+#### Pezzo ruotato sul piatto (`--plate-rotation`)
+
+In Bambu Studio `infill_direction` è un angolo del **piatto**, non del pezzo.
+L'ho verificato sui sorgenti: l'oggetto viene tagliato in layer già ruotato
+(`PrintObject::trafo` contiene la rotazione dell'istanza) e `Fill::_infill_direction`
+non compensa la rotazione. Quindi, se un provino lungo 100 mm viene messo sulla
+diagonale del piatto a 45°, le regioni con `infill_direction = 45` stampano linee
+**parallele all'asse del provino**, e quelle a 135° perpendicolari: non è più
+la configurazione 45°/135° rispetto al pezzo.
+
+Per mantenere gli angoli rispetto al pezzo, passa la rotazione che il pezzo ha
+sul piatto:
+
+```bash
+python section_infill.py provino.stl --out-dir output_rot --export-3mf \
+    --template-3mf modello_H2D_PA6.3mf --plate-rotation 42.4
+```
+
+Nel `.3mf` il pezzo e i modifier sono ruotati di 42,4° attorno all'asse verticale
+(antiorario visto dall'alto, centro del piatto) e ogni modifier riceve
+`infill_direction = angolo relativo + rotazione`, per esempio 45° → 87,4° e
+135° → 177,4° (modulo 180°). Il programma stampa la tabella delle conversioni, e
+nel JSON ogni regione ha `infill_angle_deg` (relativo al pezzo) e
+`plate_angle_deg` (sul piatto). Se il pezzo ruotato esce dall'area di stampa del
+template, c'è un avviso.
+
+Per scegliere la rotazione: 0° = lato lungo lungo X; 90° = lungo Y; per la
+diagonale dell'H2D (350 × 320 mm) l'angolo è `atan(320/350) ≈ 42,4°`.
+
+> ⚠️ **Non ruotare a mano il pezzo in Bambu Studio dopo aver aperto il `.3mf`:**
+> i modifier ruoterebbero con il pezzo, ma gli `infill_direction` restano quelli
+> scritti, e la compensazione si perde. Se ti serve un'altra rotazione, rigenera
+> il progetto con `--plate-rotation`. Se usi i metodi A/B (import manuale degli
+> STL) e ruoti il pezzo di θ, imposta su ogni modifier il valore `plate_angle_deg`
+> del JSON (angolo relativo + θ) e non il valore nel nome del file.
+>
+> Nel campo "Rotation Z" di Bambu Studio dovresti rivedere il valore passato a
+> `--plate-rotation`, ma non ho potuto verificarlo sull'interfaccia: controlla
+> che il verso sia antiorario, come nella miniatura del piatto.
+
 #### Verificare il risultato sul G-code
 
 Dopo lo slice, esporta il piatto con **File → Export → Export plate sliced
@@ -287,11 +328,21 @@ python analyze_gcode.py provino.gcode.3mf output/provino_sections.json
 ```
 
 Per ogni layer e ogni regione stampa la direzione dominante delle linee di
-infill e la lunghezza estrusa, poi controlla che le regioni adiacenti siano
-ortogonali su tutti i layer. Esce con codice 0 se tutto è corretto, 1 altrimenti.
-I layer di bridge non vengono controllati, perché la loro direzione è automatica.
-Con Grid, o con un pattern a più direzioni, compare `45+135` nelle celle dei
-layer sparsi e il controllo fallisce.
+infill (sul piatto) e la lunghezza estrusa, poi fa due controlli su tutti i layer:
+1. le regioni adiacenti sono ortogonali;
+2. la direzione **rispetto al pezzo** è quella configurata (45° o 135°, più 90°
+   sui layer alterni), qualunque sia la rotazione del pezzo sul piatto. La
+   rotazione e la posizione sono lette dal JSON (`bambu_3mf.placement`).
+
+Esce con codice 0 se tutto è corretto, 1 altrimenti. I layer di bridge non
+vengono controllati, perché la loro direzione è automatica. Con Grid, o con un
+pattern a più direzioni, compare ad esempio `45+135` nelle celle dei layer sparsi
+e il controllo fallisce. Con un pezzo ruotato **senza** compensare gli angoli le
+regioni restano ortogonali tra loro, ma il secondo controllo fallisce.
+
+Se il JSON non contiene la posizione (generato con una versione precedente) o il
+pezzo è stato ruotato a mano in Bambu Studio, usa `--rotation DEG` e, per un
+pezzo non simmetrico, `--offset DX DY`.
 
 ### Metodo A: caricare pezzo e modifier insieme come oggetto multi-parte
 
@@ -341,10 +392,11 @@ sono nello stesso sistema di coordinate.
 
 ### Avvertenze
 
-- **Non ruotare il pezzo sul piatto dopo aver assegnato gli angoli.** La direzione
-  dell'infill in Bambu Studio è riferita agli assi del piatto, non al pezzo: se
-  ruoti l'oggetto di 90°, 45° e 135° si scambiano rispetto al pezzo. Se ti serve
-  un'orientazione diversa, ruota il modello in CAD, riesporta e rigenera.
+- **La direzione dell'infill in Bambu Studio è riferita al piatto, non al pezzo.**
+  Se ruoti l'oggetto sul piatto, gli angoli rispetto al pezzo cambiano (a 90°,
+  45° e 135° si scambiano). Per posizionare il pezzo a un angolo qualsiasi,
+  genera il progetto con `--plate-rotation` (vedi "Pezzo ruotato sul piatto"),
+  invece di ruotarlo a mano.
 - **Non usare il pattern Grid per l'infill sparso.** Grid stampa sia +45° sia
   −45° su ogni layer, quindi ruotarlo di 90° dà lo stesso identico disegno e
   l'alternanza 45°/135° tra regioni non ha alcun effetto. L'ho verificato sul

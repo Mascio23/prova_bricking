@@ -13,7 +13,8 @@ from pathlib import Path
 
 from infill_sectioning import __version__
 from infill_sectioning.bambu3mf import (Volume, build_3mf, infill_settings, pattern_choices,
-                                        pattern_warning, read_template, write_3mf)
+                                        pattern_warning, placement, plate_fit_warning,
+                                        read_template, write_3mf)
 from infill_sectioning.export import build_report, write_json, write_modifier_stls, write_png
 from infill_sectioning.footprint import extract_footprint, load_mesh
 from infill_sectioning.moments import polygon_moments, raster_moments
@@ -55,6 +56,12 @@ def parse_args(argv=None):
     p.add_argument("--template-3mf", type=Path, default=None,
                    help="Bambu Studio project (.3mf, File > Save Project) whose printer/"
                         "filament/process settings are copied into the exported .3mf")
+    p.add_argument("--plate-rotation", type=float, default=0.0, metavar="DEG",
+                   help="rotate the part (and its modifiers) by DEG degrees about the vertical "
+                        "axis on the plate, counter-clockwise seen from above. In Bambu Studio "
+                        "the infill direction refers to the PLATE, so this option adds DEG to "
+                        "every modifier's angle: the angles relative to the part stay 45/135. "
+                        "Written into the .3mf (--export-3mf); the JSON lists the plate angles")
     p.add_argument("--infill-density", type=float, default=100.0, metavar="PCT",
                    help="sparse infill density [%%] of every modifier in the .3mf "
                         "(default 100 = fully solid). The top/bottom solid layers are not "
@@ -122,6 +129,9 @@ def run(args) -> dict:
         "z_range_mm": [round(z_min, 4), round(z_max, 4)],
     }
     report = build_report(result, params, input_info, mod_files, moments_check)
+    for entry, r in zip(report["regions"], result.regions):
+        entry["plate_angle_deg"] = plate_angle(r.angle, args.plate_rotation)
+    report["parameters"]["plate_rotation_deg"] = args.plate_rotation
     if mod_files:
         # Helps placing a modifier by hand (Bambu Studio "Add modifier -> Load"):
         # offset of each modifier's bounding-box centre from the part's one.
@@ -144,6 +154,11 @@ def run(args) -> dict:
     return report
 
 
+def plate_angle(angle: float, rotation: float) -> float:
+    """Infill angle on the plate for an angle relative to the part (part rotated by `rotation`)."""
+    return round((angle + rotation) % 180.0, 6)
+
+
 def parse_settings(items) -> dict:
     settings = {}
     for item in items:
@@ -163,11 +178,20 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
     template = read_template(args.template_3mf) if args.template_3mf else None
     part_name = args.model.with_suffix(".stl").name
     volumes = [Volume(part_name, mesh, "normal_part")]
+    theta = args.plate_rotation
     for r, (name, _, mmesh) in zip(result.regions, mod_files):
-        settings = {"infill_direction": f"{r.angle:g}", **extra}
+        settings = {"infill_direction": f"{plate_angle(r.angle, theta):g}", **extra}
         volumes.append(Volume(name, mmesh, "modifier_part", settings))
     path = out / f"{prefix}.3mf"
-    write_3mf(path, build_3mf(volumes, prefix, template))
+    write_3mf(path, build_3mf(volumes, prefix, template, rotation_deg=theta))
+    place = placement(volumes, template, theta)
+    if theta:
+        print(f"3mf: part rotated by {theta:g} deg on the plate; infill_direction on the plate = "
+              "angle relative to the part + rotation: " + ", ".join(
+                  f"R{r.id} {r.angle:g}->{plate_angle(r.angle, theta):g}" for r in result.regions))
+        fit = plate_fit_warning(volumes, template, theta)
+        if fit:
+            print("WARNING:", fit)
     n_tri = sum(len(v.mesh.faces) for v in volumes)
     print(f"3mf: 1 part + {len(volumes) - 1} modifiers, {n_tri} triangles -> {path}")
     if len(volumes) - 1 > 32 or n_tri > 300_000:
@@ -186,7 +210,7 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         print("NOTE: no --template-3mf given: the .3mf has no printer/filament/process "
               "settings, Bambu Studio will use the presets currently selected.")
     return {"file": path.name, "template": str(args.template_3mf) if template else None,
-            "modifier_settings": extra, "warning": warning}
+            "modifier_settings": extra, "warning": warning, "placement": place}
 
 
 def main(argv=None) -> int:
