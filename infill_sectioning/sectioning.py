@@ -48,6 +48,8 @@ class Region:
     # Intersection of the cutting half-planes that produced this region (None
     # if the region is one of several disconnected pieces of the same cell).
     cell: Polygon | None = None
+    # True if this region got the optional third angle (see assign_angles)
+    extra: bool = False
 
     @property
     def area(self) -> float:
@@ -198,9 +200,69 @@ def build_adjacency(regions: list[Region], tol: float = 1e-4, min_len: float = 1
             b.neighbors[a.id] = shared
 
 
-def assign_angles(regions: list[Region], angles=(45.0, 135.0)):
-    """Two-colour the adjacency graph; returns list of conflicting edges."""
+def _min_extra_colouring(regions: list[Region], node_limit: int = 400_000):
+    """Proper 3-colouring of the adjacency graph that uses colour 2 on as few regions as
+    possible (ties: smallest total area). Colours 0/1 are the two main angles.
+
+    Branch and bound over a BFS order, with the first region of every component fixed
+    to colour 0 (the swap symmetry). Returns (colours, proven_minimal) or (None, False)
+    when no proper 3-colouring was found within `node_limit` search nodes."""
     n = len(regions)
+    adj = [set(r.neighbors) for r in regions]
+    area = [r.area for r in regions]
+    order, seen = [], set()
+    for start in sorted(range(n), key=lambda i: -len(adj[i])):
+        if start in seen:
+            continue
+        queue = [start]
+        seen.add(start)
+        while queue:
+            i = queue.pop(0)
+            order.append(i)
+            for j in sorted(adj[i], key=lambda j: -len(adj[j])):
+                if j not in seen:
+                    seen.add(j)
+                    queue.append(j)
+    is_root = {order[0]} | {i for k, i in enumerate(order)
+                            if not any(j in adj[i] for j in order[:k])}
+    col = [-1] * n
+    best = {"cost": (n + 1, 0.0), "col": None}
+    nodes = [0]
+
+    def rec(k, count, extra_area):
+        if (count, extra_area) >= best["cost"]:
+            return
+        nodes[0] += 1
+        if nodes[0] > node_limit:
+            return
+        if k == n:
+            best["cost"], best["col"] = (count, extra_area), col[:]
+            return
+        i = order[k]
+        used = {col[j] for j in adj[i] if col[j] >= 0}
+        for c in ((0,) if i in is_root else (0, 1, 2)):
+            if c in used:
+                continue
+            col[i] = c
+            rec(k + 1, count + (c == 2), extra_area + (area[i] if c == 2 else 0.0))
+            col[i] = -1
+
+    rec(0, 0, 0.0)
+    return best["col"], nodes[0] <= node_limit
+
+
+def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle: float | None = None):
+    """Give every region one of two angles so that neighbours differ (2-colouring of the
+    adjacency graph); returns the list of conflicting edges (same angle on a shared edge).
+
+    With T-junctions the graph can have odd cycles and two angles are not enough. If
+    `extra_angle` is given, a third angle is then used on as few regions as possible
+    (`Region.extra`), and only on those, so that no two neighbours share an angle. With
+    `extra_angle=None` the assignment with the least shared edge length is kept and its
+    conflicts are returned."""
+    n = len(regions)
+    for r in regions:
+        r.extra = False
     edges = [(a.id, b_id, w) for a in regions for b_id, w in a.neighbors.items()
              if a.id < b_id]
 
@@ -242,14 +304,21 @@ def assign_angles(regions: list[Region], angles=(45.0, 135.0)):
                     improved = True
                 else:
                     col[i] = 1 - col[i]
+    conflicts = [(i, j, w) for i, j, w in edges if col[i] == col[j]]
+    if conflicts and extra_angle is not None:
+        col3, _ = _min_extra_colouring(regions)
+        if col3 is not None:
+            col, conflicts = col3, []
+    palette = (float(angles[0]), float(angles[1]), None if extra_angle is None else float(extra_angle))
     for r in regions:
-        r.angle = float(angles[col[r.id]])
-    return [(i, j, w) for i, j, w in edges if col[i] == col[j]]
+        r.angle = palette[col[r.id]]
+        r.extra = col[r.id] == 2
+    return conflicts
 
 
 def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bisect",
             min_area: float = 1.0, max_depth: int = 12, angles=(45.0, 135.0),
-            max_pieces: int = 64) -> SectioningResult:
+            max_pieces: int = 64, extra_angle: float | None = None) -> SectioningResult:
     part_m = polygon_moments(part)
     if mode == "bisect":
         regions, cuts = bisect_regions(part, max_area, max_ar, min_area, max_depth)
@@ -265,7 +334,11 @@ def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bis
     for i, r in enumerate(regions):
         r.id = i
     build_adjacency(regions)
-    conflicts = assign_angles(regions, angles)
+    if extra_angle is not None and any(
+            abs(((extra_angle - a + 90) % 180) - 90) < 1e-6 for a in angles):
+        raise ValueError(f"the extra angle ({extra_angle:g}) must differ from {angles[0]:g} "
+                         f"and {angles[1]:g} (angles are taken modulo 180)")
+    conflicts = assign_angles(regions, angles, extra_angle)
     return SectioningResult(part, part_m, regions, cuts, conflicts, mode)
 
 

@@ -279,3 +279,95 @@ def test_step_input(tmp_path):
     res = section(fp, 900, 2.0)
     assert len(res.regions) == 4
     assert [r.angle for r in res.regions] == [45.0, 135.0, 45.0, 135.0]
+
+
+# --------------------------------------------------------------------------- #
+# optional third angle (only where two angles are not enough)
+# --------------------------------------------------------------------------- #
+def t_shape():
+    return unary_union([box(0, 0, 120, 25), box(45, 25, 70, 80)])
+
+
+def neighbours_share_angle(res):
+    return [(r.id, j) for r in res.regions for j in r.neighbors
+            if j > r.id and res.regions[j].angle == r.angle]
+
+
+def test_two_angles_are_not_always_enough():
+    res = section(t_shape(), 900, 2.0)  # default: no third angle
+    assert res.conflicts  # T-junctions -> odd cycles
+    assert not any(r.extra for r in res.regions)
+    assert {r.angle for r in res.regions} <= {45.0, 135.0}
+
+
+def test_extra_angle_resolves_conflicts_on_the_fewest_regions():
+    import itertools
+
+    res = section(t_shape(), 900, 2.0, extra_angle=90.0)
+    assert res.conflicts == [] and neighbours_share_angle(res) == []
+    extra = [r.id for r in res.regions if r.extra]
+    assert extra and all(res.regions[i].angle == 90.0 for i in extra)
+    assert all(r.angle in (45.0, 135.0) for r in res.regions if not r.extra)
+    # minimality (brute force): no smaller independent set S leaves a bipartite graph
+    n = len(res.regions)
+    adj = [set(r.neighbors) for r in res.regions]
+
+    def feasible(S):
+        if any(b in adj[a] for a, b in itertools.combinations(S, 2)):
+            return False
+        col = {}
+        for s0 in range(n):
+            if s0 in S or s0 in col:
+                continue
+            col[s0], stack = 0, [s0]
+            while stack:
+                i = stack.pop()
+                for j in adj[i] - set(S):
+                    if j not in col:
+                        col[j] = 1 - col[i]
+                        stack.append(j)
+                    elif col[j] == col[i]:
+                        return False
+        return True
+
+    assert feasible(set(extra))
+    assert not any(feasible(set(S)) for k in range(len(extra))
+                   for S in itertools.combinations(range(n), k))
+    check_partition(res, 900, 2.0)
+
+
+@pytest.mark.parametrize("geom", [rect(), l_shape(), plate_with_hole()],
+                         ids=["rect", "L", "hole"])
+def test_extra_angle_not_used_when_two_angles_suffice(geom):
+    plain = section(geom, 900, 2.0)
+    assert plain.conflicts == []
+    with_extra = section(geom, 900, 2.0, extra_angle=90.0)
+    assert not any(r.extra for r in with_extra.regions)
+    assert [r.angle for r in with_extra.regions] == [r.angle for r in plain.regions]
+
+
+def test_extra_angle_must_differ_from_the_main_angles():
+    for bad in (45.0, 135.0, 225.0, -45.0):
+        with pytest.raises(ValueError, match="extra angle"):
+            section(rect(), 900, 2.0, extra_angle=bad)
+
+
+def test_conflicts_remain_if_three_angles_are_not_enough():
+    tri = Polygon([(0, 0), (160, 0), (60, 90)])
+    res = section(tri, 900, 2.0, extra_angle=90.0)
+    assert res.conflicts == [] or neighbours_share_angle(res)  # reported, never hidden
+    assert bool(res.conflicts) == bool(neighbours_share_angle(res))
+
+
+def test_cli_extra_angle_end_to_end(tmp_path):
+    mesh = trimesh.creation.extrude_polygon(t_shape(), height=4.0)
+    mesh.export(tmp_path / "t.stl")
+    out = tmp_path / "o"
+    section_infill.main([str(tmp_path / "t.stl"), "--out-dir", str(out), "--extra-angle", "90",
+                         "--export-3mf", "--plate-rotation", "20"])
+    rep = json.loads((out / "t_sections.json").read_text())
+    extra = rep["summary"]["extra_angle_regions"]
+    assert extra and rep["summary"]["adjacency_conflicts"] == []
+    assert {r["infill_angle_deg"] for r in rep["regions"] if r["extra_angle"]} == {90.0}
+    assert {r["plate_angle_deg"] for r in rep["regions"] if r["extra_angle"]} == {110.0}
+    assert (out / "t_sections.png").stat().st_size > 10_000

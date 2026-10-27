@@ -167,3 +167,34 @@ def test_direction_clusters():
     both = [(45.0, 100.0), (135.0, 90.0)]
     assert len(analyze_gcode.clusters(both)) == 2
     assert analyze_gcode.circ_dist(179.0, 1.0) == pytest.approx(2.0)
+
+
+def lines_at(centre, angle, n=5, step=3.0, length=10.0):
+    th = math.radians(angle)
+    d, nrm = (math.cos(th), math.sin(th)), (-math.sin(th), math.cos(th))
+    out = []
+    for k in range(n):
+        o = (k - (n - 1) / 2) * step
+        p0 = (centre[0] + nrm[0] * o - d[0] * length / 2, centre[1] + nrm[1] * o - d[1] * length / 2)
+        out += [f"G1 X{p0[0]:.3f} Y{p0[1]:.3f}",
+                f"G1 X{p0[0] + d[0] * length:.3f} Y{p0[1] + d[1] * length:.3f} E1.0"]
+    return out
+
+
+def two_region_gcode(a0, a1):
+    return "\n".join(["; CHANGE_LAYER", "; FEATURE: Sparse infill"]
+                     + lines_at((12.5, 10.0), a0) + lines_at((37.5, 10.0), a1)) + "\n"
+
+
+def test_neighbours_at_a_configured_non_orthogonal_difference(tmp_path, capsys):
+    """Regions with the optional third angle: 45 next to 90 is the configured difference."""
+    sec = json.loads(json.dumps(SECTIONS))
+    sec["regions"][1]["infill_angle_deg"] = 90.0
+    s = tmp_path / "s.json"
+    s.write_text(json.dumps(sec))
+    g = tmp_path / "x.gcode"
+    g.write_text(two_region_gcode(45.0, 90.0))
+    assert analyze_gcode.main([str(g), str(s), "--offset", "0", "0"]) == 0
+    g.write_text(two_region_gcode(45.0, 135.0))  # orthogonal, but not what was configured
+    assert analyze_gcode.main([str(g), str(s), "--offset", "0", "0"]) == 1
+    assert "WRONG ANGLE BETWEEN NEIGHBOURS" in capsys.readouterr().out

@@ -48,6 +48,7 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--max-ar` | 2.0 | aspect ratio massimo dell'ellisse equivalente |
 | `--mode` | `bisect` | `bisect` è il metodo di Shen et al.; `nsplit` è **sperimentale** (vedi sotto) |
 | `--angles A1 A2` | 45 135 | i due angoli di infill da alternare [°] |
+| `--extra-angle DEG` | (non usato) | terzo angolo, usato **solo** se due angoli non bastano (giunzioni a T) e sul minor numero possibile di regioni; per esempio `90` |
 | `--margin-xy` | 2.0 | di quanto i modifier sporgono oltre le pareti esterne del pezzo [mm] |
 | `--margin-z` | 1.0 | di quanto i modifier sporgono sopra il pezzo [mm] |
 | `--footprint` | `projection` | `projection` = ombra della mesh su XY; `section` = sezione a metà altezza |
@@ -136,7 +137,22 @@ entrambe le metà.
 - Con giunzioni a T il grafo può contenere cicli dispari. In quel caso non esiste
   un'alternanza perfetta: il programma sceglie l'assegnazione che minimizza la
   lunghezza di bordo condivisa tra regioni con lo stesso angolo e la riporta in
-  `summary.adjacency_conflicts`.
+  `summary.adjacency_conflicts`. Succede con forme non rettangolari (T, L grandi,
+  C), non con un provino rettangolare, dove la bisezione dà fette in fila.
+- **Terzo angolo, solo dove serve** (`--extra-angle`, di norma `90`). Se due
+  angoli non bastano, il programma cerca la colorazione con 3 angoli che usa il
+  terzo sul **minor numero di regioni** (a parità, sull'area minore): ricerca
+  esatta con branch and bound, e sulle forme che provo (T, Z, L, C) basta il
+  terzo angolo su 2–5 regioni. Se due angoli bastano, il terzo non compare mai.
+  Costi da sapere: tra una regione col terzo angolo e le sue vicine la differenza
+  è 45° e non 90°, quindi lì l'alternanza è meno marcata; e `0°` o `90°` sono
+  parallelo e perpendicolare all'asse X **del pezzo**. Se nemmeno tre angoli
+  bastano (succede con forme molto frammentate, per esempio un triangolo diviso
+  in tante parti), restano dei conflitti, e vengono elencati nel report e
+  nell'output.
+  Nel JSON: `summary.extra_angle_regions` e, per ogni regione, `extra_angle`; nel
+  PNG le regioni col terzo angolo sono verdi, con tratteggio verticale, e in
+  legenda compare "extra, only where needed".
 
 **Modifier STL.**
 - Ogni modifier è il prisma della regione, allargato di `--margin-xy` **solo sui
@@ -329,7 +345,8 @@ python analyze_gcode.py provino.gcode.3mf output/provino_sections.json
 
 Per ogni layer e ogni regione stampa la direzione dominante delle linee di
 infill (sul piatto) e la lunghezza estrusa, poi fa due controlli su tutti i layer:
-1. le regioni adiacenti sono ortogonali;
+1. le regioni adiacenti hanno la differenza di angolo configurata (90° per
+   45°/135°, 45° dove è stato usato il terzo angolo);
 2. la direzione **rispetto al pezzo** è quella configurata (45° o 135°, più 90°
    sui layer alterni), qualunque sia la rotazione del pezzo sul piatto. La
    rotazione e la posizione sono lette dal JSON (`bambu_3mf.placement`).

@@ -5,7 +5,8 @@ Reads a sliced Bambu Studio file (.gcode or .gcode.3mf) and the *_sections.json
 written by section_infill.py, and reports, for every region and layer, the
 dominant direction of the infill lines. Two things are checked:
 
-1. adjacent regions print orthogonal infill (45 vs 135) on every layer;
+1. adjacent regions print infill at the configured angle difference on every layer
+   (90 deg for 45 vs 135; less where a third angle was needed, see --extra-angle);
 2. the direction relative to the part is the configured one (45 or 135, or the
    same plus 90 on the alternate layers), whatever the rotation of the part on
    the plate (the infill direction in Bambu Studio refers to the plate).
@@ -176,6 +177,7 @@ def main(argv=None) -> int:
           f"{rotation:g} deg;  angles relative to the part: " + "  ".join(
               f"R{r['id']}={r['angle']:g}" for r in regions))
     print(f"\n{'layer':>5} {'feature':<22}" + "".join(f"{'R' + str(i):>18}" for i in range(n)))
+    angle_of = {r["id"]: r["angle"] for r in regions}
     ortho_bad, rel_bad, checked, pairs = [], [], 0, 0
     auto_layers = set()
     for L, f in sorted({(k[0], k[1]) for k in segs}):
@@ -205,16 +207,19 @@ def main(argv=None) -> int:
                 if j > r["id"] and cl and dom.get(j):
                     pairs += 1
                     a, b = dom[r["id"]], dom[j]
+                    cfg = (angle_of[r["id"]] - angle_of[j]) % 180
                     if not (len(a) == 1 and len(b) == 1 and
-                            circ_dist(a[0][0] - b[0][0], 90) <= args.tolerance):
-                        ortho_bad.append((L, f, r["id"], j, fmt(a), fmt(b)))
+                            circ_dist(a[0][0] - b[0][0], cfg) <= args.tolerance):
+                        ortho_bad.append((L, f, r["id"], j, fmt(a), fmt(b), cfg))
 
     print(f"\nlayers with automatic bridge direction, not checked: {sorted(auto_layers) or 'none'}")
     print(f"adjacent region pairs checked: {pairs};  region-layers checked against the "
           f"configured angle: {checked}")
     if ortho_bad:
         e = ortho_bad[0]
-        print(f"NOT ORTHOGONAL in {len(ortho_bad)} cases, e.g. layer {e[0]} {e[1]}: "
+        kind = "NOT ORTHOGONAL" if circ_dist(e[6], 90) < 1e-6 else \
+            f"WRONG ANGLE BETWEEN NEIGHBOURS (configured difference {e[6]:g})"
+        print(f"{kind} in {len(ortho_bad)} cases, e.g. layer {e[0]} {e[1]}: "
               f"R{e[2]}={e[4]} vs R{e[3]}={e[5]}")
         print("  ('a+b' = two directions on the same layer, e.g. Grid: no alternation)")
     if rel_bad:
@@ -226,8 +231,8 @@ def main(argv=None) -> int:
               "on the plate")
     if ortho_bad or rel_bad:
         return 1
-    print("OK: adjacent regions print orthogonal infill, at the configured angle relative "
-          "to the part, on every checked layer")
+    print("OK: adjacent regions print the configured angle difference, at the configured angle "
+          "relative to the part, on every checked layer")
     return 0
 
 

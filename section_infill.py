@@ -36,6 +36,11 @@ def parse_args(argv=None):
                         "nsplit = EXPERIMENTAL equal-width N slabs, for comparison only")
     p.add_argument("--angles", type=float, nargs=2, default=[45.0, 135.0],
                    metavar=("A1", "A2"), help="the two infill angles [deg] (default 45 135)")
+    p.add_argument("--extra-angle", type=float, default=None, metavar="DEG",
+                   help="third infill angle [deg], used ONLY if two angles are not enough "
+                        "(T-junctions between regions) and then on as few regions as "
+                        "possible. Default: not used. Must differ from the two angles "
+                        "(e.g. 90)")
     p.add_argument("--min-area", type=float, default=1.0,
                    help="never create regions smaller than this [mm^2] (safety stop)")
     p.add_argument("--max-depth", type=int, default=12, help="max recursion depth")
@@ -77,6 +82,7 @@ def parse_args(argv=None):
                         "(e.g. sparse_infill_pattern=zig-zag, sparse_infill_density=100%%)")
     p.add_argument("--no-stl", action="store_true", help="do not write modifier STLs")
     p.add_argument("--no-png", action="store_true", help="do not write the PNG preview")
+    p.add_argument("--png-dpi", type=int, default=200, help="resolution of the PNG preview")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p.parse_args(argv)
 
@@ -106,7 +112,7 @@ def run(args) -> dict:
 
     result = section(part, args.max_area, args.max_ar, mode=args.mode,
                      min_area=args.min_area, max_depth=args.max_depth,
-                     angles=tuple(args.angles))
+                     angles=tuple(args.angles), extra_angle=args.extra_angle)
 
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
@@ -150,7 +156,7 @@ def run(args) -> dict:
     if not args.no_png:
         title = (f"{args.model.name} — {len(result.regions)} regions  "
                  f"(mode={args.mode}, max area={args.max_area:g} mm², max AR={args.max_ar:g})")
-        write_png(result, out / f"{prefix}_sections.png", title, mod_files)
+        write_png(result, out / f"{prefix}_sections.png", title, mod_files, dpi=args.png_dpi)
     return report
 
 
@@ -222,8 +228,15 @@ def main(argv=None) -> int:
         print(f"  R{r['id']:<2d} angle={r['infill_angle_deg']:>5g}°  "
               f"area={r['area_mm2']:9.2f} mm²  AR={r['aspect_ratio']:5.2f}  "
               f"bbox={r['bbox']}")
+    if s["extra_angle_regions"]:
+        print(f"NOTE: two angles are not enough for this shape: the third angle "
+              f"({args.extra_angle:g} deg) is used only on regions "
+              f"{s['extra_angle_regions']}; there neighbours differ by less than 90 deg")
     if s["adjacency_conflicts"]:
         print("WARNING: adjacent regions with the same angle:", s["adjacency_conflicts"])
+        if args.extra_angle is None:
+            print("  (T-junctions: use --extra-angle 90 to give a third angle to the "
+                  "fewest regions that need it)")
     if report["parameters"]["mode"] == "nsplit":
         print("NOTE: nsplit is EXPERIMENTAL and is not the method of Shen et al.")
     print(f"output written to {args.out_dir}")

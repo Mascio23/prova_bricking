@@ -14,7 +14,7 @@ from .sectioning import SectioningResult, coverage_error, modifier_footprints
 
 # Two-slot categorical palette (validated reference palette, slots 1-2);
 # the hatch direction is a second, colour-independent encoding of the angle.
-ANGLE_COLORS = ["#2a78d6", "#eb6834"]
+ANGLE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 MUTED = "#898781"
@@ -90,6 +90,7 @@ def build_report(result: SectioningResult, params: dict, input_info: dict,
             "major_axis_deg": _r(m.major_axis_deg, 3),
             "equiv_ellipse_semi_axes_mm": [_r(a), _r(b)],
             "bbox": _bbox(r.geom),
+            "extra_angle": r.extra,
             "depth": r.depth,
             "split_path": r.path,
             "within_thresholds": r.within_thresholds,
@@ -125,6 +126,7 @@ def build_report(result: SectioningResult, params: dict, input_info: dict,
             "all_within_thresholds": all(r.within_thresholds for r in result.regions),
             "angle_counts": {str(ang): sum(1 for r in result.regions if r.angle == ang)
                              for ang in sorted({r.angle for r in result.regions})},
+            "extra_angle_regions": [r.id for r in result.regions if r.extra],
             "adjacency_conflicts": [
                 {"regions": [i, j], "shared_length_mm": _r(w, 3)}
                 for i, j, w in result.conflicts],
@@ -189,8 +191,9 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
     fig.patch.set_facecolor("#fcfcfb")
     ax.set_facecolor("#fcfcfb")
 
-    angles = sorted({r.angle for r in result.regions})
-    color_of = {a: ANGLE_COLORS[i % 2] for i, a in enumerate(angles)}
+    main_angles = sorted({r.angle for r in result.regions if not r.extra})
+    extra_angles = sorted({r.angle for r in result.regions if r.extra})
+    color_of = {a: ANGLE_COLORS[i] for i, a in enumerate(main_angles + extra_angles)}
     spacing = max(w, h) / 60
 
     # modifier outlines (dashed, muted)
@@ -227,9 +230,15 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
         ax.plot([a_[0], b_[0]], [a_[1], b_[1]], color=INK, lw=0.8, ls="--", zorder=8)
     ax.plot(*result.part_moments.centroid, marker="+", color=INK, ms=8, zorder=9)
 
-    handles = [Patch(facecolor=color_of[a], alpha=0.5, edgecolor=color_of[a],
-                     hatch="//" if a < 90 else "\\\\", label=f"infill {a:g}°")
-               for a in angles]
+    def hatch_of(a):  # a hatch close to the real direction, as a second encoding of the angle
+        a = a % 180
+        return ("--" if min(a, 180 - a) < 22.5 else "//" if a < 67.5 else
+                "||" if a < 112.5 else "\\\\")
+
+    handles = [Patch(facecolor=color_of[a], alpha=0.5, edgecolor=color_of[a], hatch=hatch_of(a),
+                     label=f"infill {a:g}°" + (" (extra, only where needed)"
+                                               if a in extra_angles else ""))
+               for a in main_angles + extra_angles]
     handles += [Line2D([], [], color=INK, ls="--", lw=0.8, label="cut (minor axis)"),
                 Line2D([], [], color=INK_2, ls=":", lw=0.8, label="equivalent ellipse")]
     if modifier_files:
