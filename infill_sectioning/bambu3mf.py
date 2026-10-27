@@ -413,8 +413,13 @@ def _slug(label: str) -> str:
 _BY_NAME = {_slug(label): k for k, label in PATTERNS if k != "zigzag"}
 
 
+def pattern_names() -> list[str]:
+    """Names accepted for --infill-pattern, in the order of the Bambu Studio menu."""
+    return [_slug(label) if k != "zigzag" else "zigzag" for k, label in PATTERNS]
+
+
 def pattern_choices() -> str:
-    return ", ".join(_slug(label) if k != "zigzag" else "zigzag" for k, label in PATTERNS)
+    return ", ".join(pattern_names())
 
 
 def pattern_key(name: str) -> str:

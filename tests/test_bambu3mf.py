@@ -314,3 +314,14 @@ def test_plate_fit_warning():
     assert plate_fit_warning(vols, t, 0.0) is None
     assert "beyond the printable area" in plate_fit_warning(vols, t, 90.0)
     assert plate_fit_warning(vols, None, 90.0) is None
+
+
+def test_inherit_infill_writes_only_the_direction(tmp_path):
+    g, rep = run_cli(tmp_path, "--inherit-infill", "--infill-density", "20")
+    for m, angle in zip(modifier_parts(g), ["45", "135", "45", "135"]):
+        assert m["infill_direction"] == angle
+        assert not any(k in m for k in ("sparse_infill_density", "sparse_infill_pattern",
+                                        "skeleton_infill_density", "skin_infill_density"))
+    # the template's pattern (grid) is the one that will print: the warning must say so
+    assert "grid" in rep["bambu_3mf"]["warning"]
+    assert rep["bambu_3mf"]["modifier_settings"] == {}

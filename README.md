@@ -35,7 +35,52 @@ pip install cadquery-ocp         # solo per leggere file STEP (kernel OpenCascad
 Serve Python ≥ 3.10. `cadquery-ocp` è opzionale: senza, lo script funziona
 comunque su STL, OBJ, PLY, 3MF e simili.
 
-## Uso
+## Interfaccia grafica
+
+Se non vuoi scrivere i comandi:
+
+```bash
+python section_infill_gui.py
+```
+
+![interfaccia, scheda Bambu Studio](docs/gui_bambu.png)
+
+La finestra ha tre schede:
+1. **Pezzo e file**: modello (STL o STEP), cartella di output, prefisso, e cosa
+   scrivere (PNG, STL dei modifier, progetto `.3mf`).
+2. **Sezionamento**: area e aspect ratio massimi, i due angoli, la casella del
+   **terzo angolo solo dove serve** e, tra le avanzate, modalità, sagoma, area
+   minima, profondità e margini dei modifier.
+3. **Progetto Bambu Studio**: template, casella **Imposta l'infill sparso**
+   (densità e pattern, a scelta tra i pattern di Bambu), casella **Ruota il
+   pezzo sul piatto** (con i gradi) e un riquadro per altre impostazioni dei
+   modifier, una per riga (`top_shell_layers=7`).
+
+Le caselle non spuntate non scrivono nulla: i campi collegati si disattivano e
+l'opzione corrispondente non compare nel comando. Se togli la spunta a
+*Imposta l'infill sparso*, i modifier non toccano densità e pattern, che restano
+quelli del template.
+
+I pulsanti:
+- **Anteprima regioni** calcola il sezionamento e lo mostra nella finestra, senza
+  scrivere alcun file nella cartella di output;
+- **Genera** scrive i file e il log compare in basso a destra;
+- **Copia comando** copia negli appunti il comando equivalente, mostrato in
+  basso e aggiornato a ogni modifica: serve a ripetere una prova dal terminale e
+  a documentarla in tesi;
+- **Salva preset… / Carica preset…** salvano e ricaricano tutti i campi in un
+  file `.json` (per esempio uno per ogni condizione del DOE). All'avvio la
+  finestra riapre l'ultima configurazione usata (`~/.infill_sectioning_gui.json`).
+
+I campi vengono controllati prima di partire: un numero sbagliato, due angoli
+uguali, una densità fuori da 0–100, un file che non esiste o un'impostazione
+senza `=` danno un elenco di errori e non parte nulla.
+
+`tkinter` è incluso in Python su Windows e macOS. Su Linux:
+`sudo apt install python3-tk`. Quello che la finestra esegue è lo stesso
+`section_infill.py` di sempre, quindi il risultato è identico a quello del terminale.
+
+## Uso da terminale
 
 ```bash
 python section_infill.py provino.stl --max-area 900 --max-ar 2.0 --out-dir ./output
@@ -60,6 +105,7 @@ python section_infill.py provino.step --out-dir ./output          # STEP (richie
 | `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
 | `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
 | `--plate-rotation DEG` | 0 | ruota il pezzo e i modifier di DEG gradi sul piatto (antiorario visto dall'alto) e somma DEG agli angoli: gli angoli **rispetto al pezzo** restano 45°/135° (vedi "Pezzo ruotato sul piatto") |
+| `--inherit-infill` | | non scrive densità e pattern dell'infill sparso nei modifier: restano quelli del template |
 | `--infill-density PCT` | 100 | densità dell'infill sparso [%] di ogni modifier nel `.3mf` (0–100) |
 | `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio (spazi → trattini): vedi la tabella dei pattern più sotto |
 | `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
@@ -469,9 +515,13 @@ infill_sectioning/
   export.py                    JSON, PNG, STL
   bambu3mf.py                  progetto Bambu Studio (.3mf)
 analyze_gcode.py               controllo delle direzioni di infill nel G-code
+section_infill_gui.py          interfaccia grafica (tkinter)
+infill_sectioning/gui_model.py campi dell'interfaccia, validazione e comando generato
 tests/test_sectioning.py       test (pytest)
 tests/test_bambu3mf.py         test dell'export .3mf
 tests/test_analyze_gcode.py    test del controllo sul G-code
+tests/test_gui_model.py        test dei campi, della validazione e del comando della GUI
+tests/test_gui_smoke.py        prova della finestra (richiede tkinter e un display; altrimenti saltata)
 tests/data/                    progetto di riferimento salvato da Bambu Studio
 examples/make_test_parts.py    pezzi di prova procedurali
 ```

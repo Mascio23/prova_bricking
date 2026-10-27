@@ -67,6 +67,10 @@ def parse_args(argv=None):
                         "the infill direction refers to the PLATE, so this option adds DEG to "
                         "every modifier's angle: the angles relative to the part stay 45/135. "
                         "Written into the .3mf (--export-3mf); the JSON lists the plate angles")
+    p.add_argument("--inherit-infill", action="store_true",
+                   help="do not write the sparse infill density and pattern into the "
+                        "modifiers: they keep the ones of the template/process "
+                        "(--infill-density and --infill-pattern are then ignored)")
     p.add_argument("--infill-density", type=float, default=100.0, metavar="PCT",
                    help="sparse infill density [%%] of every modifier in the .3mf "
                         "(default 100 = fully solid). The top/bottom solid layers are not "
@@ -88,7 +92,7 @@ def parse_args(argv=None):
 
 
 def run(args) -> dict:
-    if args.export_3mf:  # fail early on a typo, before writing anything
+    if args.export_3mf and not args.inherit_infill:  # fail early on a typo
         try:
             infill_settings(args.infill_density, args.infill_pattern)
         except ValueError as exc:
@@ -177,8 +181,9 @@ def parse_settings(items) -> dict:
 
 def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
     try:
-        extra = {**infill_settings(args.infill_density, args.infill_pattern),
-                 **parse_settings(args.mod_settings)}  # --3mf-setting wins
+        sparse = {} if args.inherit_infill else infill_settings(args.infill_density,
+                                                                args.infill_pattern)
+        extra = {**sparse, **parse_settings(args.mod_settings)}  # --3mf-setting wins
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
     template = read_template(args.template_3mf) if args.template_3mf else None
@@ -204,11 +209,16 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         print("WARNING: large project (many modifiers or triangles): Bambu Studio may "
               "take a long time to open it. Consider larger --max-area / --max-ar or a "
               "lighter mesh.")
-    print(f"3mf: sparse infill {extra['sparse_infill_density']} "
-          f"{extra['sparse_infill_pattern']} in every modifier; solid layers = "
-          f"{template.global_settings.get('bottom_shell_layers', '?') if template else '?'} bottom / "
-          f"{template.global_settings.get('top_shell_layers', '?') if template else '?'} top "
-          "(from the template), same 45/135 direction as the sparse infill")
+    shells = (f"{template.global_settings.get('bottom_shell_layers', '?') if template else '?'} bottom / "
+              f"{template.global_settings.get('top_shell_layers', '?') if template else '?'} top")
+    if "sparse_infill_density" in extra or "sparse_infill_pattern" in extra:
+        print(f"3mf: sparse infill {extra.get('sparse_infill_density', 'from template')} "
+              f"{extra.get('sparse_infill_pattern', 'from template')} in every modifier; "
+              f"solid layers = {shells} (from the template), same 45/135 direction as the "
+              "sparse infill")
+    else:
+        print(f"3mf: sparse infill density and pattern inherited from the template; "
+              f"solid layers = {shells}")
     warning = pattern_warning(template, extra)
     if warning:
         print("WARNING:", warning)
