@@ -1,0 +1,453 @@
+============================================================================================
+GUIDA ALL'USO - SEZIONAMENTO DELL'INFILL CONTRO IL WARPING
+============================================================================================
+
+Programma che implementa il criterio di sezionamento dell'infill di
+Shen, Veeramani, Qin (2026), "Warpage mitigation through infill sectioning in fused
+filament fabrication", IISE Transactions 58(1):57-69.
+
+Cosa fa, in una frase: prende il modello 3D di un pezzo (STL o STEP), lo divide in
+sotto-regioni con le soglie del paper, assegna alle regioni vicine direzioni di infill
+alternate (45 e 135 gradi) e prepara un progetto di Bambu Studio (.3mf) con tutto gia'
+configurato.
+
+Il testo e' diviso cosi':
+  1. Prima installazione
+  2. Uso con l'interfaccia grafica, passo per passo
+  3. Significato di ogni campo
+  4. Ricette per i casi piu' comuni
+  5. Dopo "Genera": Bambu Studio
+  6. Verifica sul G-code
+  7. Consigli per il DOE e la tesi
+  8. Cosa e' stato verificato e cosa no
+  9. Problemi frequenti
+ 10. Uso da terminale
+ 11. I file prodotti
+
+
+--------------------------------------------------------------------------------------------
+1. PRIMA INSTALLAZIONE
+--------------------------------------------------------------------------------------------
+
+Serve Python 3.10 o successivo (su Windows va bene quello di python.org, che include
+tkinter, necessario per la finestra).
+
+a) Scarica il codice da GitHub: repository mascio23/prova_bricking, branch
+   claude/warping-infill-sectioning-9cbi1f, pulsante Code -> Download ZIP. Estrai lo ZIP.
+   Quando lo aggiorno, riscarica lo ZIP: una versione vecchia non ha le opzioni nuove
+   (e' gia' successo: "unrecognized arguments" vuol dire quasi sempre questo).
+
+b) Apri PowerShell DENTRO la cartella estratta (quella con section_infill_gui.py).
+   Suggerimento: in Esplora file, nella cartella, scrivi "powershell" nella barra
+   dell'indirizzo e premi Invio.
+
+c) Installa le librerie, una volta sola:
+       pip install -r requirements.txt
+   Solo se hai file STEP (non STL):
+       pip install cadquery-ocp
+
+d) Avvia l'interfaccia:
+       python section_infill_gui.py
+
+Per controllare di avere la versione giusta:
+       python section_infill.py --help
+Nell'elenco devono comparire --export-3mf, --plate-rotation, --extra-angle,
+--infill-density.
+
+
+--------------------------------------------------------------------------------------------
+2. USO CON L'INTERFACCIA GRAFICA, PASSO PER PASSO
+--------------------------------------------------------------------------------------------
+
+La finestra ha tre schede a sinistra, l'anteprima e il log a destra, il comando
+equivalente e i pulsanti in basso.
+
+PASSO 1 - Scheda "1. Pezzo e file"
+  - Modello: premi Sfoglia e scegli lo STL (o lo STEP) del pezzo.
+  - Cartella di output: dove verranno scritti i file (predefinita: "output", dentro la
+    cartella del programma).
+  - Prefisso dei file: facoltativo. Se e' vuoto si usa il nome del modello.
+  - Lascia spuntate le tre caselle (PNG, STL, .3mf), a meno che non ti servano meno file.
+
+PASSO 2 - Scheda "2. Sezionamento"
+  - Per il provino rettangolare i valori predefiniti vanno bene: area massima 900,
+    aspect ratio massimo 2, angoli 45 e 135.
+  - Lascia vuota la casella del terzo angolo (serve solo per forme irregolari).
+
+PASSO 3 - Scheda "3. Progetto Bambu Studio"
+  - Template: scegli il progetto di Bambu Studio con la tua stampante, il tuo filamento
+    e il tuo processo (vedi il punto 3 piu' sotto per come prepararlo).
+  - Imposta l'infill sparso: scegli la densita' (100 = pieno) e il pattern.
+  - Ruota il pezzo sul piatto: spunta solo se vuoi il pezzo inclinato.
+
+PASSO 4 - "Anteprima regioni"
+  Mostra a destra come viene sezionato il pezzo, senza scrivere nulla nella cartella
+  di output. Controlla che le regioni siano quelle che ti aspetti. Per il provino
+  100 x 20 mm devono comparire 4 regioni da 25 x 20 mm, con angoli 45, 135, 45, 135.
+
+PASSO 5 - "Genera"
+  Scrive tutti i file (vedi il punto 11). Nel riquadro a destra in basso compare il log;
+  a fine lavoro la scritta in basso dice "Fatto". Se c'e' un errore, il messaggio e'
+  nel log.
+
+PASSO 6 - "Apri cartella di output"
+  Apre la cartella con i file. Il progetto da aprire in Bambu Studio e' <prefisso>.3mf.
+
+Altri pulsanti:
+  - Copia comando: copia negli appunti il comando da terminale equivalente a quello che
+    hai impostato (mostrato nel riquadro "Comando equivalente"). Utile per ripetere una
+    prova e per documentarla.
+  - Salva preset / Carica preset: salvano e ricaricano tutti i campi in un file .json.
+    Consiglio: un preset per ogni condizione del DOE.
+  - All'avvio la finestra riapre l'ultima configurazione usata.
+
+Se un campo e' sbagliato (numero non valido, due angoli uguali, densita' fuori da
+0-100, file che non esiste, impostazione extra senza "="), compare un elenco di errori
+e non parte nulla.
+
+Le caselle non spuntate non scrivono nulla: i campi collegati si disattivano e
+l'opzione non compare nel comando.
+
+
+--------------------------------------------------------------------------------------------
+3. SIGNIFICATO DI OGNI CAMPO
+--------------------------------------------------------------------------------------------
+
+SCHEDA 1 - PEZZO E FILE
+  Modello             STL o STEP. Il pezzo deve avere sezione sostanzialmente costante in
+                      Z (piastre, provini, chiavi): il programma usa la sagoma vista
+                      dall'alto, non gestisce pezzi la cui sezione cambia molto con
+                      l'altezza.
+  Cartella di output  Dove scrivere i file.
+  Prefisso            Parte iniziale del nome dei file prodotti.
+  PNG                 Immagine con la sagoma e le regioni, colorate per angolo.
+  STL dei modifier    Un file STL per regione. Servono se vuoi importare i modifier a
+                      mano in Bambu Studio. Con il .3mf spuntato vengono scritti comunque.
+  Progetto .3mf       Il file pronto da aprire in Bambu Studio.
+
+SCHEDA 2 - SEZIONAMENTO
+  Area massima [mm2]  Una regione si divide in due se la sua area supera questo valore...
+  Aspect ratio max    ...oppure se il rapporto tra asse maggiore e minore della sua
+                      ellisse equivalente supera questo valore. Il taglio e' lungo
+                      l'asse minore, passante per il baricentro, e si ripete sulle due
+                      meta' finche' tutte rispettano le soglie. Valori del paper:
+                      900 mm2 e 2.
+  Angolo 1, Angolo 2  Le due direzioni di infill, alternate tra regioni vicine
+                      (45 e 135). Sono angoli RISPETTO AL PEZZO (vedi la rotazione).
+  Terzo angolo        Vedi la ricetta 4.5. Di norma non serve.
+  Modalita'           bisect = il metodo del paper. nsplit = SPERIMENTALE, divide in N
+                      fasce uguali (sul provino 100 x 20 da' 3 fasce da 33,3 mm). Non e'
+                      il metodo di Shen et al.: non citarlo come tale in tesi. Utile solo
+                      come confronto.
+  Sagoma              projection = ombra del pezzo sul piano XY (consigliato).
+                      section = sezione a meta' altezza.
+  Area minima         Blocco di sicurezza: sotto questa area non si divide piu'.
+  Profondita' massima Altro blocco di sicurezza sulle divisioni successive.
+  Margine XY, Z       Di quanto i modifier sporgono oltre il pezzo (2 mm ai lati esterni,
+                      1 mm sopra). Sui lati di taglio i modifier si toccano senza
+                      sovrapporsi. Non vanno sotto la base del pezzo.
+
+SCHEDA 3 - PROGETTO BAMBU STUDIO
+  Template            Un progetto .3mf salvato da Bambu Studio (File -> Save Project As).
+                      Da qui si copiano stampante, filamento e processo (temperature,
+                      pareti, layer, brim...). NON usare un .gcode.3mf: e' un piatto
+                      gia' elaborato, senza la struttura del progetto.
+                      Senza template il .3mf non contiene queste impostazioni e Bambu
+                      Studio usa i preset selezionati in quel momento.
+  Imposta l'infill    Se spuntata, ogni modifier riceve densita' e pattern scelti qui.
+  sparso              Se non spuntata, i modifier non toccano densita' e pattern: valgono
+                      quelli del template.
+  Densita' [%]        0-100. A 100 tutti i layer sono solidi. Sotto 100, i layer di
+                      bottom e top (e i solidi interni) restano pieni e mantengono
+                      l'alternanza; cambia l'infill dei layer intermedi.
+  Pattern             Vedi la tabella dei pattern piu' sotto.
+  Ruota il pezzo      Mette il pezzo inclinato sul piatto di questi gradi (antiorario
+  sul piatto          visto dall'alto) e corregge gli angoli in modo che rispetto al pezzo
+                      restino 45 e 135. Vedi la ricetta 4.3.
+  Altre impostazioni  Una per riga, nella forma CHIAVE=VALORE, applicate a tutti i
+                      modifier. Esempio: top_shell_layers=7. Prevalgono sulle altre
+                      opzioni. Le chiavi sono quelle di configurazione di Bambu Studio.
+
+COME PREPARARE IL TEMPLATE
+  1. In Bambu Studio scegli stampante (H2D), filamento (il PA6 che usi davvero) e
+     processo (altezza layer, pareti, top/bottom, brim, temperatura del piatto).
+  2. Importa un oggetto qualsiasi: serve solo per poter salvare, verra' ignorato.
+  3. File -> Save Project As... e salva come .3mf (per esempio template_H2D_PA6.3mf).
+  4. Usa un template diverso per ogni condizione che cambia parametri di processo.
+
+PATTERN DELL'INFILL SPARSO (scheda 3, campo Pattern)
+  rectilinear (predefinito)  Una direzione per layer, ruota di 90 gradi a ogni layer.
+                             VERIFICATO sul G-code: l'alternanza tra regioni funziona.
+  line, aligned-rectilinear  Una direzione per layer. Atteso come rectilinear, NON
+                             verificato. Aligned non inverte la direzione tra layer.
+  grid                       Stampa le due diagonali insieme su ogni layer: l'alternanza
+                             45/135 sull'infill sparso NON HA NESSUN EFFETTO (verificato
+                             sul G-code). Resta efficace solo sui layer solidi.
+  tutti gli altri            (gyroid, cubic, honeycomb, triangles, ...) Non hanno una sola
+                             direzione per layer: l'effetto dell'alternanza non e'
+                             garantito e non e' verificato. Il programma stampa un avviso.
+  Nota: la voce "Rectilinear" del menu di Bambu Studio e' memorizzata con il nome interno
+  "zig-zag". Il programma gestisce la differenza: tu scrivi/scegli "rectilinear".
+
+
+--------------------------------------------------------------------------------------------
+4. RICETTE PER I CASI PIU' COMUNI
+--------------------------------------------------------------------------------------------
+
+4.1  PROVINO RETTANGOLARE 100 x 20 x 4 mm, INFILL PIENO
+     Scheda 1: modello, cartella.  Scheda 2: valori predefiniti.
+     Scheda 3: template, "Imposta l'infill sparso" spuntata, densita' 100, rectilinear.
+     Risultato atteso: 4 regioni da 25 x 20 mm (area 500 mm2, AR 1,25), angoli
+     45/135/45/135.
+     Nota: la bisezione del paper da' sempre 2, 4, 8... regioni per ramo. Con 100 x 20
+     non esistono 3 regioni: 2 da 50 mm avrebbero AR 2,5 e sarebbero fuori soglia.
+
+4.2  STESSO PROVINO CON INFILL SPARSO (per esempio 20%)
+     Come sopra, ma densita' 20. I layer di bottom (3), solidi interni e top (5,
+     numeri del template) restano alternati; cambiano i layer intermedi.
+     Eccezione da conoscere: il primo layer che copre l'infill sparso e' un "bridge
+     interno", e Bambu Studio ne sceglie la direzione da solo. Nel G-code di prova e'
+     uguale in tutte le regioni (135 gradi). E' un layer su 20 nel provino da 4 mm e
+     compare solo con densita' sotto il 100%. Va dichiarato in tesi.
+     Per cambiare il numero di layer solidi: nel template, oppure per i soli modifier
+     con l'impostazione extra top_shell_layers=7 (o bottom_shell_layers=...).
+
+4.3  PEZZO INCLINATO SUL PIATTO (per esempio sulla diagonale)
+     In Bambu Studio l'angolo dell'infill e' riferito al PIATTO, non al pezzo. Se
+     inclini il pezzo di 45 gradi lasciando 45 e 135, le linee a 45 diventano parallele
+     all'asse del pezzo. Per mantenere 45 e 135 rispetto al pezzo, spunta "Ruota il pezzo
+     sul piatto" e scrivi la rotazione. Esempio: 42.4 (diagonale dell'H2D, 350 x 320 mm:
+     atan(320/350)). Il programma ruota pezzo e modifier nel .3mf e somma la rotazione
+     agli angoli: 45 diventa 87,4 e 135 diventa 177,4 sul piatto.
+     - 0 = lato lungo lungo X; 90 = lungo Y.
+     - NON ruotare a mano il pezzo in Bambu Studio dopo aver aperto il progetto: i
+       modifier ruoterebbero con il pezzo ma gli angoli scritti no, e la compensazione
+       si perde. Rigenera il progetto con un'altra rotazione.
+     - Il programma avvisa se il pezzo ruotato esce dall'area di stampa del template.
+     - Non ho potuto verificare in Bambu Studio il verso di "Rotation Z" nell'interfaccia
+       (il programma scrive la rotazione antioraria, come nella miniatura): controlla
+       sul tuo schermo che il pezzo sia ruotato nel verso atteso.
+
+4.4  PROVINO DI CONTROLLO (senza sezionamento)
+     Non serve il programma: stampa lo STL normale con lo stesso template, senza
+     modifier. Confronta sezionato e non sezionato alla stessa densita' e allo stesso
+     pattern, cosi' l'unica differenza e' il sezionamento.
+
+4.5  FORMA IRREGOLARE: TERZO ANGOLO
+     Con forme non rettangolari (T, L grandi, C, Z) due soli angoli possono non bastare:
+     in certi punti tre regioni si toccano a vicenda. Spunta "Terzo angolo" e scrivi per
+     esempio 90. Il programma usa il terzo angolo SOLO dove strettamente necessario e sul
+     minor numero possibile di regioni. Se due angoli bastano, il terzo non compare. Dove
+     compare, la differenza con le regioni vicine e' di 45 gradi e non di 90. Se nemmeno
+     tre angoli bastano (forme molto frammentate) restano dei conflitti, elencati nel
+     log e nel report.
+
+4.6  LASCIARE L'INFILL COME NEL TEMPLATE
+     Togli la spunta a "Imposta l'infill sparso": i modifier ricevono solo la direzione.
+     Attenzione: se il template usa Grid, l'alternanza sull'infill sparso non avra' effetto
+     (il programma avvisa).
+
+
+--------------------------------------------------------------------------------------------
+5. DOPO "GENERA": BAMBU STUDIO
+--------------------------------------------------------------------------------------------
+
+  1. File -> Open Project e scegli <cartella di output>\<prefisso>.3mf.
+  2. Nella lista oggetti devi vedere il pezzo e le parti "..._modifier_XX_..." con
+     l'icona dei modifier. Ogni modifier mostra la direzione dell'infill (45 o 135, oppure
+     il valore ruotato) e, se l'hai impostata, densita' e pattern.
+  3. Fai lo slice. Il piatto deve misurare circa le dimensioni del pezzo (per il provino
+     100 x 20 mm, piu' il brim), non 104 x 24: se sono piu' grandi i modifier sono stati
+     trattati come parti solide (successe con l'import manuale senza "Change type").
+  4. Guarda l'anteprima layer per layer: le regioni vicine devono avere linee
+     perpendicolari.
+  5. Per la verifica numerica, vedi il punto 6.
+
+Import manuale (alternativa): se preferisci importare tu pezzo e modifier, usa gli STL
+prodotti. File -> Import, seleziona insieme il pezzo e tutti i modifier, rispondi Si' alla
+domanda sull'oggetto multi-parte, poi per OGNI modifier: tasto destro -> Change type ->
+Modifier, e imposta la direzione dell'infill indicata nel nome del file (se il pezzo e'
+ruotato di theta, usa il valore "plate_angle_deg" del file JSON, non quello del nome).
+Il progetto .3mf automatico evita tutto questo.
+
+
+--------------------------------------------------------------------------------------------
+6. VERIFICA SUL G-CODE
+--------------------------------------------------------------------------------------------
+
+Questa verifica serve a dimostrare in tesi che il pezzo stampato ha davvero l'alternanza
+prevista. Si fa da terminale (non e' ancora nella finestra).
+
+  1. In Bambu Studio fai lo slice, poi File -> Export -> Export plate sliced file. Ottieni
+     un file .gcode.3mf.
+  2. Nella cartella del programma:
+       python analyze_gcode.py "C:\percorso\provino.gcode.3mf" "output\provino_sections.json"
+  3. Lo strumento stampa, per ogni layer e ogni regione, la direzione dominante delle
+     linee e la lunghezza estrusa, poi controlla due cose:
+       - le regioni vicine hanno la differenza di angolo configurata (90 gradi per
+         45/135);
+       - la direzione rispetto al pezzo e' quella configurata, anche se il pezzo e'
+         ruotato sul piatto.
+     I layer di bridge non vengono controllati perche' la loro direzione e' automatica.
+  4. Alla fine compare "OK" (codice 0) oppure l'elenco dei problemi (codice 1).
+     Con Grid compare "45+135" nelle celle dei layer sparsi: due direzioni sullo stesso
+     layer, nessuna alternanza.
+  Se il file JSON e' stato generato con una versione precedente, o hai ruotato il pezzo a
+  mano in Bambu Studio, usa --rotation GRADI (e --offset DX DY per pezzi non simmetrici).
+
+
+--------------------------------------------------------------------------------------------
+7. CONSIGLI PER IL DOE E LA TESI
+--------------------------------------------------------------------------------------------
+
+  - Un preset per ogni condizione (pulsante "Salva preset"), e un template per ogni
+    insieme di parametri di processo. Cosi' ogni progetto generato documenta le condizioni
+    di stampa.
+  - "Copia comando" produce la riga da incollare nella tesi per riprodurre la prova.
+  - Il file JSON (<prefisso>_sections.json) contiene parametri, aree, aspect ratio, angoli
+    (relativi al pezzo e sul piatto), poligoni delle regioni e posizione sul piatto.
+  - Densita' e pattern sono fattori a se': confronta sezionato e non sezionato a parita'
+    di entrambi.
+  - Stampa le condizioni nello stesso ordine casuale e, se puoi, sullo stesso piatto
+    nello stesso giorno: il warping dipende molto da temperatura del piatto e ambiente.
+  - Dichiara in tesi: versione di Bambu Studio, template usato, densita', pattern, numero
+    di layer solidi, rotazione sul piatto, e l'eccezione del bridge interno.
+  - Il metodo di Shen et al. e' "bisect". "nsplit" e' sperimentale: se lo usi, indicalo
+    come tale.
+
+
+--------------------------------------------------------------------------------------------
+8. COSA E' STATO VERIFICATO E COSA NO
+--------------------------------------------------------------------------------------------
+
+VERIFICATO
+  - Sezionamento del rettangolo 100 x 20: 4 regioni da 25 x 20 mm (test automatici).
+  - Momenti d'immagine: calcolo esatto sul poligono, confrontato con cv2.moments sulla
+    sagoma rasterizzata.
+  - Struttura del .3mf: confrontata con un progetto salvato da Bambu Studio 2.08 (stesse
+    trasformazioni, posizione sul piatto, geometria, impostazioni), e letta con lib3mf.
+  - Sul tuo G-code al 20% (H2D, Bambu Studio 2.08, rectilinear): tutti i layer di
+    bottom, solidi interni, sparsi e top alternano 45/135 tra regioni vicine; il layer di
+    bridge interno no. Densita' del 20% confermata dalla distanza tra le linee.
+  - Sul G-code del primo test con Grid: nessuna alternanza sui layer sparsi.
+  - Il programma di verifica del G-code funziona su G-code sintetici con pezzo ruotato
+    (test automatici).
+
+NON VERIFICATO
+  - L'apertura e lo slice in Bambu Studio di un progetto con --plate-rotation (il verso
+    della rotazione e' coerente con il formato 3MF e con i sorgenti di Bambu Studio, ma
+    non l'ho visto in Bambu Studio).
+  - Pattern diversi da rectilinear e grid.
+  - L'interfaccia grafica su Windows (provata su Linux con display virtuale).
+  - Qualsiasi effetto dell'alternanza sul warping vero e proprio: il programma prepara
+    la configurazione, la misura del warping e' il tuo esperimento.
+  - I nomi dei menu di Bambu Studio citati qui sono quelli della versione 2.08.
+
+
+--------------------------------------------------------------------------------------------
+9. PROBLEMI FREQUENTI
+--------------------------------------------------------------------------------------------
+
+"unrecognized arguments: --export-3mf ..." in PowerShell
+  Hai una versione vecchia del programma: riscarica lo ZIP. In PowerShell il "\" a fine
+  riga NON va a capo (si usa il backtick `, preceduto da uno spazio): meglio scrivere il
+  comando su una sola riga. Metti uno spazio tra il nome del file e "--out-dir". I
+  percorsi con spazi vanno tra virgolette doppie.
+
+Bambu Studio resta in caricamento quando apro il .3mf
+  Usa la versione aggiornata del programma (il formato e' stato corretto). Se il pezzo
+  e' grande, i modifier possono essere decine: il programma lo segnala ("large project");
+  alza area massima o aspect ratio, oppure semplifica la mesh. Se si blocca, chiudi da
+  Gestione attivita' e mandami il file.
+
+Il piatto e' piu' grande del pezzo (104 x 24 invece di 100 x 20)
+  I modifier sono stati stampati come parti solide. Con il progetto .3mf automatico non
+  succede; con l'import manuale ricorda "Change type -> Modifier" per ogni modifier.
+
+Le regioni vicine non sono perpendicolari nell'anteprima di Bambu Studio
+  Controlla il pattern: con Grid (o altri pattern a piu' direzioni) l'infill sparso non
+  alterna. Usa rectilinear. Poi verifica con il punto 6.
+
+Compare l'avviso su un pattern
+  E' voluto: il pattern scelto non stampa una sola direzione per layer. Il progetto viene
+  generato comunque.
+
+"adiacenti con lo stesso angolo" (conflitti) nel log
+  Forma con giunzioni a T: usa il terzo angolo (ricetta 4.5).
+
+Il programma dice che il pezzo ruotato esce dall'area di stampa
+  Riduci la rotazione, usa una dimensione minore o controlla che il template sia quello
+  della tua stampante (l'area si legge dal template).
+
+La finestra non si apre su Linux ("No module named tkinter")
+  sudo apt install python3-tk
+
+Errore leggendo un file STEP
+  pip install cadquery-ocp. In alternativa esporta il pezzo in STL.
+
+
+--------------------------------------------------------------------------------------------
+10. USO DA TERMINALE
+--------------------------------------------------------------------------------------------
+
+Tutto quello che fa la finestra si puo' fare da terminale (la finestra mostra il comando).
+Sempre su una sola riga in PowerShell, dentro la cartella del programma.
+
+Solo sezionamento, report e immagine:
+  python section_infill.py "provino.stl" --out-dir output
+
+Con progetto Bambu Studio, infill pieno:
+  python section_infill.py "provino.stl" --out-dir output --export-3mf --template-3mf "template_H2D_PA6.3mf"
+
+Infill sparso al 20%, rectilinear:
+  python section_infill.py "provino.stl" --out-dir output_20 --export-3mf --template-3mf "template_H2D_PA6.3mf" --infill-density 20
+
+Pezzo sulla diagonale del piatto:
+  python section_infill.py "provino.stl" --out-dir output_rot --export-3mf --template-3mf "template_H2D_PA6.3mf" --plate-rotation 42.4
+
+Forma irregolare con terzo angolo dove serve:
+  python section_infill.py "pezzo.stl" --out-dir output --extra-angle 90 --export-3mf --template-3mf "template_H2D_PA6.3mf"
+
+Verifica sul G-code:
+  python analyze_gcode.py "provino.gcode.3mf" "output\provino_sections.json"
+
+Opzioni principali:
+  --max-area MM2          area massima di una regione (predefinito 900)
+  --max-ar AR             aspect ratio massimo (predefinito 2)
+  --angles A1 A2          i due angoli (predefinito 45 135)
+  --extra-angle GRADI     terzo angolo, solo dove serve
+  --mode bisect|nsplit    bisect = metodo del paper; nsplit = sperimentale
+  --export-3mf            scrive il progetto Bambu Studio
+  --template-3mf FILE     progetto da cui copiare stampante, filamento, processo
+  --infill-density PCT    densita' dell'infill sparso dei modifier (predefinito 100)
+  --infill-pattern NOME   pattern (predefinito rectilinear)
+  --inherit-infill        non scrivere densita' e pattern: valgono quelli del template
+  --plate-rotation GRADI  rotazione del pezzo sul piatto, con angoli compensati
+  --3mf-setting K=V       impostazione extra per ogni modifier (ripetibile)
+  --margin-xy, --margin-z sporgenza dei modifier
+  --no-stl, --no-png      non scrivere gli STL / il PNG
+  --prefix NOME           prefisso dei file
+Elenco completo: python section_infill.py --help
+
+
+--------------------------------------------------------------------------------------------
+11. I FILE PRODOTTI
+--------------------------------------------------------------------------------------------
+
+Con prefisso "provino" nella cartella di output:
+
+  provino.3mf                       Progetto per Bambu Studio (solo con .3mf spuntato)
+  provino_sections.json             Report: parametri, aree, aspect ratio, angoli, poligoni,
+                                    posizione sul piatto, avvisi
+  provino_sections.png              Immagine con le regioni colorate per angolo
+  provino_modifier_00_45deg.stl     Un file per regione, nello stesso sistema di coordinate
+  provino_modifier_01_135deg.stl    del pezzo. Il numero e' la regione, il suffisso e' il
+  ...                               suo angolo rispetto al pezzo.
+
+Il file JSON e' la fonte per analyze_gcode.py e per documentare le prove.
+
+
+============================================================================================
+Il programma completo, i test e la documentazione tecnica sono nel repository.
+Per i dettagli, vedi anche README.md.
+============================================================================================

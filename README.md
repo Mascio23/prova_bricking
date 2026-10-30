@@ -19,6 +19,8 @@ piastre, provini, chiavi) in formato STL o STEP e fa quanto segue:
    pezzo e modifier già assemblati, modifier già di tipo "Modifier" e
    `infill_direction` già impostato (45°/135° alternati).
 
+**Guida all'uso passo per passo, ricette e problemi frequenti: [GUIDA_USO.txt](GUIDA_USO.txt).**
+
 ![provino 100×20](docs/esempio_provino.png)
 ![chiave](docs/esempio_chiave.png)
 
