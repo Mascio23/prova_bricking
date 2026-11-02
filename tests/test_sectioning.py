@@ -371,3 +371,48 @@ def test_cli_extra_angle_end_to_end(tmp_path):
     assert {r["infill_angle_deg"] for r in rep["regions"] if r["extra_angle"]} == {90.0}
     assert {r["plate_angle_deg"] for r in rep["regions"] if r["extra_angle"]} == {110.0}
     assert (out / "t_sections.png").stat().st_size > 10_000
+
+
+# --------------------------------------------------------------------------- #
+# nsplit on a shape it cannot handle; crowded PNG
+# --------------------------------------------------------------------------- #
+def frame_with_windows():
+    """250 x 112 mm plate with three rectangular windows: long bars parallel to the cuts."""
+    g = box(0, 0, 250, 112).buffer(-6).buffer(6, quad_segs=16)
+    for w in (box(19, 18.5, 146, 93), box(164, 18.5, 183, 93), box(197, 18.5, 216, 93)):
+        g = g.difference(w)
+    return g
+
+
+def test_nsplit_fails_loudly_where_slabs_cannot_meet_the_thresholds():
+    with pytest.raises(ValueError, match="nsplit cannot meet the thresholds") as exc:
+        section(frame_with_windows(), 900, 2.0, mode="nsplit")
+    assert "--mode bisect" in str(exc.value)
+    # the paper's method does handle the same shape
+    res = section(frame_with_windows(), 900, 2.0, mode="bisect")
+    check_partition_area(res)
+
+
+def check_partition_area(res):
+    cov = coverage_error(res)
+    assert cov["uncovered_area"] < 1e-6 * cov["part_area"]
+    assert cov["overlap_area"] < 1e-6 * cov["part_area"]
+
+
+def test_cli_nsplit_error_is_clean_and_writes_nothing(tmp_path):
+    mesh = trimesh.creation.extrude_polygon(frame_with_windows(), height=4.0)
+    mesh.export(tmp_path / "frame.stl")
+    with pytest.raises(SystemExit, match="error: mode nsplit cannot meet"):
+        section_infill.main([str(tmp_path / "frame.stl"), "--mode", "nsplit",
+                             "--out-dir", str(tmp_path / "o")])
+    assert not (tmp_path / "o").exists()
+
+
+def test_png_with_many_regions_is_written(tmp_path):
+    mesh = trimesh.creation.extrude_polygon(frame_with_windows(), height=4.0)
+    mesh.export(tmp_path / "frame.stl")
+    out = tmp_path / "o"
+    section_infill.main([str(tmp_path / "frame.stl"), "--out-dir", str(out), "--png-dpi", "80"])
+    rep = json.loads((out / "frame_sections.json").read_text())
+    assert rep["summary"]["n_regions"] > 16
+    assert (out / "frame_sections.png").stat().st_size > 10_000

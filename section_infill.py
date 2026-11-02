@@ -114,9 +114,12 @@ def run(args) -> dict:
             "ar_rel_diff": round(abs(rm.aspect_ratio - vm.aspect_ratio) / vm.aspect_ratio, 6),
         }
 
-    result = section(part, args.max_area, args.max_ar, mode=args.mode,
-                     min_area=args.min_area, max_depth=args.max_depth,
-                     angles=tuple(args.angles), extra_angle=args.extra_angle)
+    try:
+        result = section(part, args.max_area, args.max_ar, mode=args.mode,
+                         min_area=args.min_area, max_depth=args.max_depth,
+                         angles=tuple(args.angles), extra_angle=args.extra_angle)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}")
 
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)

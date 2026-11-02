@@ -207,7 +207,11 @@ SCHEDA 2 - SEZIONAMENTO
   Modalita'           bisect = il metodo del paper. nsplit = SPERIMENTALE, divide in N
                       fasce uguali (sul provino 100 x 20 da' 3 fasce da 33,3 mm). Non e'
                       il metodo di Shen et al.: non citarlo come tale in tesi. Utile solo
-                      come confronto.
+                      come confronto, e solo su forme semplici e allungate: taglia
+                      perpendicolarmente all'asse maggiore di tutta la sagoma, quindi su
+                      una cornice o una piastra con finestre non riesce a rispettare le
+                      soglie e il programma si ferma con un errore ("nsplit cannot meet
+                      the thresholds"). Per quelle forme usa bisect.
   Sagoma              projection = ombra del pezzo sul piano XY (consigliato).
                       section = sezione a meta' altezza.
   Area minima         Blocco di sicurezza: sotto questa area non si divide piu'.

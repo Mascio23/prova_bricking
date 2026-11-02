@@ -247,7 +247,11 @@ The procedure is repeated on both halves.
 It divides the footprint into N slabs of equal width along the major axis, with the
 smallest N that satisfies the thresholds. On the 100×20 specimen it gives 3 slabs of
 33.3 mm (AR 1.67). It only serves as a comparison in the DOE plan. The JSON flags it in
-the `method` field.
+the `method` field. It works only on simple elongated shapes: it cuts across the major
+axis of the whole footprint, so it cannot shorten parts that run parallel to the cuts
+(the long bars of a frame, a plate with windows). When the thresholds cannot be met even
+with 64 slabs the program stops with an error and writes nothing; use `bisect` for such
+shapes.
 
 ## Tests
 

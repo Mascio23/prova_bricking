@@ -184,7 +184,11 @@ TAB 2 - SECTIONING
   Mode                bisect = the method of the paper. nsplit = EXPERIMENTAL, divides
                       into N equal slabs (on the 100 x 20 specimen it gives 3 slabs of
                       33.3 mm). It is not the method of Shen et al.: do not cite it as
-                      such in the thesis. Useful only as a comparison.
+                      such in the thesis. Useful only as a comparison, and only on
+                      simple elongated shapes: it cuts across the major axis of the
+                      whole footprint, so on a frame or a plate with windows it cannot
+                      reach the thresholds and the program stops with an error ("nsplit
+                      cannot meet the thresholds"). For those shapes use bisect.
   Footprint           projection = shadow of the part on the XY plane (recommended).
                       section = cross-section at mid height.
   Minimum area        Safety stop: below this area it does not split any more.

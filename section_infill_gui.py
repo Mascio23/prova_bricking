@@ -184,7 +184,7 @@ class App(tk.Tk):
         ttk.Label(t2, text="Advanced", font=("TkDefaultFont", 9, "bold")).grid(
             row=7, column=0, sticky="w")
         self._row(t2, 8, "Mode", "mode", 10, values=list(MODES),
-                  hint="bisect = method of the paper; nsplit = EXPERIMENTAL")
+                  hint="bisect = method of the paper; nsplit = EXPERIMENTAL, simple elongated shapes only")
         self._row(t2, 9, "Footprint", "footprint", 10, values=list(FOOTPRINTS),
                   hint="projection = shadow; section = cross-section at mid height")
         self._row(t2, 10, "Minimum area [mm²]", "min_area", 10, hint="safety stop")

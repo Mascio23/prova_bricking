@@ -203,6 +203,7 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
                 ax.add_patch(patch(p, facecolor="none", edgecolor=MUTED, lw=0.6,
                                    ls=(0, (3, 2)), zorder=1))
 
+    many = len(result.regions) > 16  # too crowded for full labels and ellipses
     for r in result.regions:
         c = color_of[r.angle]
         for p in _polys(r.geom):
@@ -211,18 +212,20 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
         ax.add_collection(LineCollection(segs, colors=c, linewidths=0.9, zorder=3))
         for p in _polys(r.geom):
             ax.add_patch(patch(p, facecolor="none", edgecolor="#fcfcfb", lw=2.0, zorder=4))
-        # equivalent ellipse of the region (dashed)
-        a, b = r.moments.semi_axes
-        ax.add_patch(Ellipse((r.moments.cx, r.moments.cy), 2 * a, 2 * b,
-                             angle=r.moments.major_axis_deg, fill=False,
-                             edgecolor=INK_2, lw=0.7, ls=(0, (1, 1.5)), zorder=5))
+        if not many:  # equivalent ellipse of the region (dashed)
+            a, b = r.moments.semi_axes
+            ax.add_patch(Ellipse((r.moments.cx, r.moments.cy), 2 * a, 2 * b,
+                                 angle=r.moments.major_axis_deg, fill=False,
+                                 edgecolor=INK_2, lw=0.7, ls=(0, (1, 1.5)), zorder=5))
         rp = r.geom.representative_point() if not r.geom.contains(
             r.geom.centroid) else r.geom.centroid
         flag = "" if r.within_thresholds else " (!)"
-        ax.text(rp.x, rp.y,
-                f"R{r.id}{flag}\n{r.angle:g}°\nA={r.area:.0f} mm²\nAR={r.aspect_ratio:.2f}",
-                ha="center", va="center", fontsize=7, color=INK, zorder=6,
-                bbox=dict(boxstyle="round,pad=0.25", fc="#fcfcfb", ec="none", alpha=0.85))
+        label = (f"R{r.id}{flag}" if many else
+                 f"R{r.id}{flag}\n{r.angle:g}°\nA={r.area:.0f} mm²\nAR={r.aspect_ratio:.2f}")
+        ax.text(rp.x, rp.y, label, ha="center", va="center", fontsize=5 if many else 7,
+                color=INK, zorder=6,
+                bbox=dict(boxstyle="round,pad=0.15" if many else "round,pad=0.25",
+                          fc="#fcfcfb", ec="none", alpha=0.85))
 
     for p in _polys(result.part):
         ax.add_patch(patch(p, facecolor="none", edgecolor=INK, lw=1.2, zorder=7))
@@ -239,8 +242,9 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
                      label=f"infill {a:g}°" + (" (extra, only where needed)"
                                                if a in extra_angles else ""))
                for a in main_angles + extra_angles]
-    handles += [Line2D([], [], color=INK, ls="--", lw=0.8, label="cut (minor axis)"),
-                Line2D([], [], color=INK_2, ls=":", lw=0.8, label="equivalent ellipse")]
+    handles += [Line2D([], [], color=INK, ls="--", lw=0.8, label="cut (minor axis)")]
+    if not many:
+        handles.append(Line2D([], [], color=INK_2, ls=":", lw=0.8, label="equivalent ellipse"))
     if modifier_files:
         handles.append(Line2D([], [], color=MUTED, ls="--", lw=0.6, label="modifier outline"))
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.12),

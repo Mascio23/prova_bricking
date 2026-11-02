@@ -180,8 +180,16 @@ def nsplit_regions(part, max_area: float, max_ar: float, max_pieces: int = 64):
                         cuts.append((lo + t_ax * q.min(), lo + t_ax * q.max()))
         best = (regions, cuts)
         if all(r.within_thresholds for r in regions):
-            break
-    return best
+            return best
+    bad = [r for r in best[0] if not r.within_thresholds]
+    worst = max(bad, key=lambda r: r.aspect_ratio)
+    raise ValueError(
+        f"mode nsplit cannot meet the thresholds on this shape: even with {max_pieces} slabs, "
+        f"{len(bad)} of {len(best[0])} regions are out of threshold (worst: aspect ratio "
+        f"{worst.aspect_ratio:.1f}, area {worst.area:.0f} mm2). nsplit only cuts across the "
+        "major axis of the whole footprint, so it cannot shorten parts that run parallel to "
+        "the cuts (for example the long bars of a frame). Use --mode bisect (the method of "
+        "the paper), or raise --max-area / --max-ar.")
 
 
 # --------------------------------------------------------------------------- #
