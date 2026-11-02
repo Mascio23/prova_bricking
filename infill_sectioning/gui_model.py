@@ -37,6 +37,9 @@ class FormState:
     angle2: str = "135"
     use_extra_angle: bool = False
     extra_angle: str = "90"
+    use_extra_angle2: bool = False   # fourth angle, only meaningful with the third
+    extra_angle2: str = "0"
+    min_contact: str = "1"
     mode: str = "bisect"
     footprint: str = "projection"
     min_area: str = "1"
@@ -126,11 +129,20 @@ class FormState:
         a2 = number("Angle 2", self.angle2)
         if a1 is not None and a2 is not None and abs(((a1 - a2 + 90) % 180) - 90) < 1e-6:
             err.append("Angle 1 and angle 2 coincide (angles are taken modulo 180 degrees)")
-        if self.use_extra_angle:
-            e = number("Third angle", self.extra_angle)
-            for name, a in (("angle 1", a1), ("angle 2", a2)):
-                if e is not None and a is not None and abs(((e - a + 90) % 180) - 90) < 1e-6:
-                    err.append(f"Third angle: coincides with {name}")
+        taken = [("angle 1", a1), ("angle 2", a2)]
+        for use, label, text in ((self.use_extra_angle, "Third angle", self.extra_angle),
+                                 (self.use_extra_angle and self.use_extra_angle2,
+                                  "Fourth angle", self.extra_angle2)):
+            if not use:
+                continue
+            e = number(label, text)
+            if e is None:
+                continue
+            for name, a in taken:
+                if a is not None and abs(((e - a + 90) % 180) - 90) < 1e-6:
+                    err.append(f"{label}: coincides with {name}")
+            taken.append((label.lower(), e))
+        number("Minimum shared edge", self.min_contact, 0)
         number("Minimum area", self.min_area, 0)
         number("Minimum region width", self.min_width, 0)
         number("Maximum depth", self.max_depth, 1, integer=True)
@@ -173,9 +185,12 @@ class FormState:
                  "--angles", t(self.angle1), t(self.angle2)]
         if self.use_extra_angle:
             argv += ["--extra-angle", t(self.extra_angle)]
+            if self.use_extra_angle2:
+                argv.append(t(self.extra_angle2))
         defaults = FormState()
         for flag, name in (("--mode", "mode"), ("--footprint", "footprint"),
                            ("--min-area", "min_area"), ("--min-width", "min_width"),
+                           ("--min-contact", "min_contact"),
                            ("--max-depth", "max_depth"),
                            ("--margin-xy", "margin_xy"), ("--margin-z", "margin_z"),
                            ("--step-tolerance", "step_tolerance"),

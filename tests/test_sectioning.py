@@ -491,3 +491,82 @@ def test_cli_writes_the_clean_and_the_detailed_png(tmp_path):
     out3 = tmp_path / "o3"
     section_infill.main([str(tmp_path / "t.stl"), "--out-dir", str(out3), "--no-png"])
     assert not list(out3.glob("*.png"))
+
+
+# --------------------------------------------------------------------------- #
+# more than three angles: a region ringed by an odd number of neighbours
+# --------------------------------------------------------------------------- #
+def _sector(cx, cy, r0, r1, a0, a1, n=60):
+    a = [math.radians(a0 + (a1 - a0) * i / n) for i in range(n + 1)]
+    outer = [(cx + r1 * math.cos(t), cy + r1 * math.sin(t)) for t in a]
+    inner = [(cx + r0 * math.cos(t), cy + r0 * math.sin(t)) for t in reversed(a)]
+    return Polygon(outer + inner)
+
+
+def s_shape():
+    """Large S-shaped part with screw holes (~40000 mm2, 69 regions): its regions form a
+    mosaic rich in triangles, so three angles are not enough."""
+    g = unary_union([_sector(1340, 300, 40, 105, -15, 255), _sector(1360, 215, 45, 105, 165, 435)])
+    for hole in [(1415, 354), (1247, 297), (1447, 216), (1265, 170), (1372, 280)]:
+        g = g.difference(Point(*hole).buffer(4.5))
+    return g
+
+
+def same_angle_neighbours(res):
+    return [(r.id, j) for r in res.regions for j in r.neighbors
+            if j > r.id and res.regions[j].angle == r.angle]
+
+
+def test_three_angles_are_not_enough_on_the_s_shape_and_the_failure_is_reported():
+    res = section(s_shape(), 900, 2.0, extra_angle=90.0)
+    assert res.conflicts and len(res.conflicts) == len(same_angle_neighbours(res))
+    assert not any(r.extra for r in res.regions)  # nothing half-applied
+
+
+def test_a_fourth_angle_resolves_it_on_few_regions():
+    res = section(s_shape(), 900, 2.0, extra_angle=[90.0, 0.0])
+    assert res.conflicts == [] and same_angle_neighbours(res) == []
+    assert {r.angle for r in res.regions} <= {45.0, 135.0, 90.0, 0.0}
+    levels = [r.extra_level for r in res.regions]
+    assert levels.count(1) > 0 and levels.count(2) > 0
+    # lower bound: 16 vertex-disjoint triangles of mutually adjacent regions each need one
+    # region with an extra angle; the search must stay close to it
+    assert 16 <= levels.count(1) + levels.count(2) <= 20
+    check_partition(res, 900, 2.0)
+
+
+def test_the_fourth_angle_is_only_used_when_three_are_not_enough():
+    res = section(s_shape(), 900, 2.0, extra_angle=[90.0, 0.0], min_contact=3.0)
+    assert res.conflicts == []
+    assert max(r.extra_level for r in res.regions) == 1  # three angles were enough here
+
+
+def test_min_contact_ignores_corner_contacts():
+    few = section(s_shape(), 900, 2.0, min_contact=5.0)
+    many = section(s_shape(), 900, 2.0, min_contact=0.01)
+    assert sum(len(r.neighbors) for r in few.regions) < sum(len(r.neighbors) for r in many.regions)
+    assert all(w >= 5.0 for r in few.regions for w in r.neighbors.values())
+
+
+def test_the_extra_angles_must_all_differ():
+    for bad in ([90.0, 90.0], [45.0, 0.0], [90.0, 270.0]):
+        with pytest.raises(ValueError, match="coincide"):
+            section(rect(), 900, 2.0, extra_angle=bad)
+    with pytest.raises(ValueError, match="at most two"):
+        section(rect(), 900, 2.0, extra_angle=[90.0, 0.0, 10.0])
+
+
+def test_cli_explains_what_to_do_when_angles_are_not_enough(tmp_path, capsys):
+    trimesh.creation.extrude_polygon(s_shape(), height=4.0).export(tmp_path / "s.stl")
+    base = [str(tmp_path / "s.stl"), "--png-dpi", "60", "--no-png-details", "--no-stl"]
+    section_infill.main(base + ["--out-dir", str(tmp_path / "a")])
+    assert "add --extra-angle 90" in capsys.readouterr().out
+    section_infill.main(base + ["--out-dir", str(tmp_path / "b"), "--extra-angle", "90"])
+    assert "Three angles are not enough" in capsys.readouterr().out
+    section_infill.main(base + ["--out-dir", str(tmp_path / "c"), "--extra-angle", "90", "0"])
+    out = capsys.readouterr().out
+    assert "WARNING" not in out and "extra angle(s)" in out
+    rep = json.loads((tmp_path / "c" / "s_sections.json").read_text())
+    assert rep["summary"]["adjacency_conflicts"] == []
+    assert rep["parameters"]["extra_angles_deg"] == [90.0, 0.0]
+    assert {r["extra_angle_level"] for r in rep["regions"]} == {0, 1, 2}

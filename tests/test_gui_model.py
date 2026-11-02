@@ -46,7 +46,7 @@ def test_toggles_produce_the_matching_options(tmp_path):
     assert [argv[i + 1] for i, a in enumerate(argv) if a == "--3mf-setting"] == \
         ["top_shell_layers=7", "wall_loops = 3"]
     args = section_infill.parse_args(argv)
-    assert args.plate_rotation == 42.4 and args.extra_angle == 90.0 and args.mode == "nsplit"
+    assert args.plate_rotation == 42.4 and args.extra_angle == [90.0] and args.mode == "nsplit"
 
 
 def test_unchecked_options_are_left_out(tmp_path):
@@ -129,3 +129,30 @@ def test_png_details_and_min_width_options(tmp_path):
     # the preview only needs the clean image
     assert "--no-png-details" in s.to_argv(preview_dir=tmp_path / "pv")
     assert any("Minimum region width" in p for p in state(tmp_path, min_width="-1").validate())
+
+
+def test_fourth_angle_and_minimum_contact(tmp_path):
+    argv = state(tmp_path, use_extra_angle=True, extra_angle="90", use_extra_angle2=True,
+                 extra_angle2="0", min_contact="3,5").to_argv()
+    i = argv.index("--extra-angle")
+    assert argv[i:i + 3] == ["--extra-angle", "90", "0"]
+    assert argv[argv.index("--min-contact") + 1] == "3.5"
+    args = section_infill.parse_args(argv)
+    assert args.extra_angle == [90.0, 0.0] and args.min_contact == 3.5
+    # the fourth angle needs the third: alone it is ignored
+    argv = state(tmp_path, use_extra_angle=False, use_extra_angle2=True).to_argv()
+    assert "--extra-angle" not in argv
+    # default minimum contact is not written
+    assert "--min-contact" not in state(tmp_path).to_argv()
+
+
+def test_fourth_angle_validation(tmp_path):
+    p = state(tmp_path, use_extra_angle=True, extra_angle="90", use_extra_angle2=True,
+              extra_angle2="270").validate()
+    assert any("Fourth angle" in m and "third angle" in m for m in p), p
+    p = state(tmp_path, use_extra_angle=True, extra_angle="90", use_extra_angle2=True,
+              extra_angle2="45").validate()
+    assert any("Fourth angle: coincides with angle 1" in m for m in p), p
+    assert state(tmp_path, use_extra_angle=True, extra_angle="90", use_extra_angle2=True,
+                 extra_angle2="0").validate() == []
+    assert any("Minimum shared edge" in m for m in state(tmp_path, min_contact="-1").validate())

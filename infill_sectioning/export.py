@@ -14,7 +14,7 @@ from .sectioning import SectioningResult, coverage_error, modifier_footprints
 
 # Two-slot categorical palette (validated reference palette, slots 1-2);
 # the hatch direction is a second, colour-independent encoding of the angle.
-ANGLE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
+ANGLE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 MUTED = "#898781"
@@ -91,6 +91,7 @@ def build_report(result: SectioningResult, params: dict, input_info: dict,
             "equiv_ellipse_semi_axes_mm": [_r(a), _r(b)],
             "bbox": _bbox(r.geom),
             "extra_angle": r.extra,
+            "extra_angle_level": r.extra_level,
             "depth": r.depth,
             "split_path": r.path,
             "within_thresholds": r.within_thresholds,

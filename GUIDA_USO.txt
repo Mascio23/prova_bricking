@@ -23,7 +23,8 @@ usa questa tabella per ritrovarli nella finestra.
   Prefisso dei file                 ->  File prefix
   Area massima / Aspect ratio max   ->  Maximum area / Maximum aspect ratio
   Angolo 1, Angolo 2                ->  Angle 1, Angle 2
-  Terzo angolo                      ->  Third angle
+  Terzo angolo, quarto angolo       ->  Third angle, Fourth angle
+  Lunghezza minima del contatto     ->  Minimum shared edge
   Avanzate: Modalita', Sagoma       ->  Advanced: Mode, Footprint
   Area minima, Profondita' massima  ->  Minimum area, Maximum depth
   Larghezza minima delle regioni    ->  Minimum region width
@@ -210,7 +211,12 @@ SCHEDA 2 - SEZIONAMENTO
                       900 mm2 e 2.
   Angolo 1, Angolo 2  Le due direzioni di infill, alternate tra regioni vicine
                       (45 e 135). Sono angoli RISPETTO AL PEZZO (vedi la rotazione).
-  Terzo angolo        Vedi la ricetta 4.5. Di norma non serve.
+  Terzo angolo,       Vedi la ricetta 4.5. Di norma non servono.
+  Quarto angolo
+  Contatto minimo     Predefinito 1 mm. Due regioni che si toccano per meno di cosi' sono
+                      un angolo (un vertice), non un bordo in comune: non contano come
+                      vicine quando si assegnano gli angoli. Un valore piu' grande (3-5
+                      mm) richiede meno angoli extra.
   Modalita'           bisect = il metodo del paper. nsplit = SPERIMENTALE, divide in N
                       fasce uguali (sul provino 100 x 20 da' 3 fasce da 33,3 mm). Non e'
                       il metodo di Shen et al.: non citarlo come tale in tesi. Utile solo
@@ -321,14 +327,24 @@ PATTERN DELL'INFILL SPARSO (scheda 3, campo Pattern)
      modifier. Confronta sezionato e non sezionato alla stessa densita' e allo stesso
      pattern, cosi' l'unica differenza e' il sezionamento.
 
-4.5  FORMA IRREGOLARE: TERZO ANGOLO
-     Con forme non rettangolari (T, L grandi, C, Z) due soli angoli possono non bastare:
-     in certi punti tre regioni si toccano a vicenda. Spunta "Terzo angolo" e scrivi per
-     esempio 90. Il programma usa il terzo angolo SOLO dove strettamente necessario e sul
-     minor numero possibile di regioni. Se due angoli bastano, il terzo non compare. Dove
-     compare, la differenza con le regioni vicine e' di 45 gradi e non di 90. Se nemmeno
-     tre angoli bastano (forme molto frammentate) restano dei conflitti, elencati nel
-     log e nel report.
+4.5  FORMA IRREGOLARE: TERZO E QUARTO ANGOLO
+     Con forme non rettangolari (T, L grandi, C, Z, S, piastre con fori) due soli angoli
+     possono non bastare: in certi punti tre regioni si toccano a vicenda. Spunta "Terzo
+     angolo" e scrivi per esempio 90. Il programma lo usa SOLO dove strettamente
+     necessario e sul minor numero possibile di regioni. Se due angoli bastano, non
+     compare. Dove compare, la differenza con le regioni vicine e' di 45 gradi e non di 90.
+     Su pezzi grandi, curvi o forati (per esempio una S da 40000 mm2 con dei fori) tre
+     angoli possono non bastare: una regione circondata da un anello DISPARI di vicine non
+     si puo' colorare con tre angoli. In quel caso il programma non lo nasconde: scrive
+     "Three angles are not enough for this shape" e le coppie che hanno ancora lo stesso
+     angolo. Spunta "Quarto angolo" (per esempio 0, insieme a 90): viene usato solo se tre
+     sono impossibili, e di nuovo sul minor numero di regioni. Quattro angoli bastano
+     sempre. Da riga di comando: --extra-angle 90 0.
+     Su pezzi cosi' aspettati molte regioni con angolo extra (su quella S: 18 su 69, di cui
+     almeno 16 inevitabili): dipende dal mosaico delle regioni, non e' un difetto. Per
+     ridurle alza "Contatto minimo" (3-5 mm: i contatti piu' corti sono vertici e vengono
+     ignorati; con 3 mm bastano tre angoli, con 15 regioni). L'alternanza piu' debole (45
+     gradi tra una regione e le vicine) va dichiarata in tesi.
 
 4.6  LASCIARE L'INFILL COME NEL TEMPLATE
      Togli la spunta a "Imposta l'infill sparso": i modifier ricevono solo la direzione.
@@ -461,7 +477,8 @@ Compare l'avviso su un pattern
   generato comunque.
 
 "adiacenti con lo stesso angolo" (conflitti) nel log
-  Forma con giunzioni a T: usa il terzo angolo (ricetta 4.5).
+  Forma con giunzioni a T: usa il terzo angolo (ricetta 4.5). Se dice "Three angles are
+  not enough", aggiungi il quarto: --extra-angle 90 0.
 
 Il programma dice che il pezzo ruotato esce dall'area di stampa
   Riduci la rotazione, usa una dimensione minore o controlla che il template sia quello
@@ -503,7 +520,8 @@ Opzioni principali:
   --max-area MM2          area massima di una regione (predefinito 900)
   --max-ar AR             aspect ratio massimo (predefinito 2)
   --angles A1 A2          i due angoli (predefinito 45 135)
-  --extra-angle GRADI     terzo angolo, solo dove serve
+  --extra-angle GRADI [GRADI]  uno o due angoli extra, solo dove servono (es. 90 0)
+  --min-contact MM        contatti piu' corti tra regioni sono vertici (predefinito 1)
   --mode bisect|nsplit    bisect = metodo del paper; nsplit = sperimentale
   --export-3mf            scrive il progetto Bambu Studio
   --template-3mf FILE     progetto da cui copiare stampante, filamento, processo

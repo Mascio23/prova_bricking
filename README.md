@@ -52,7 +52,8 @@ The window has three tabs:
 1. **Part and files**: model (STL or STEP), output folder, prefix, and what to write
    (clean PNG, PNG with details, modifier STLs, `.3mf` project).
 2. **Sectioning**: maximum area and aspect ratio, the two angles, the **third angle,
-   only where needed** checkbox and, under *Advanced*, mode, footprint, minimum area,
+   only where needed** and **fourth angle, only if three are not enough** checkboxes
+   and, under *Advanced*, mode, footprint, minimum area,
    minimum region width, depth and modifier margins.
 3. **Bambu Studio project**: template, the **Set the sparse infill** checkbox (density
    and pattern, chosen among the Bambu patterns), the **Rotate the part on the plate**
@@ -129,7 +130,8 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--max-ar` | 2.0 | maximum aspect ratio of the equivalent ellipse |
 | `--mode` | `bisect` | `bisect` is the method of Shen et al.; `nsplit` is **experimental** (see below) |
 | `--angles A1 A2` | 45 135 | the two infill angles to alternate [°] |
-| `--extra-angle DEG` | (not used) | third angle, used **only** if two angles are not enough (T-junctions) and on as few regions as possible; for example `90` |
+| `--extra-angle DEG [DEG]` | (not used) | one or two extra angles, used **only** if two angles are not enough (T-junctions) and on as few regions as possible; the second one only if three are not enough; for example `90` or `90 0` |
+| `--min-contact` | 1.0 | two regions are neighbours only if they share an edge at least this long [mm]; shorter contacts are corners and are ignored when assigning angles (a larger value needs fewer extra angles) |
 | `--margin-xy` | 2.0 | how far the modifiers extend beyond the outer walls of the part [mm] |
 | `--margin-z` | 1.0 | how far the modifiers extend above the part [mm] |
 | `--footprint` | `projection` | `projection` = shadow of the mesh on XY; `section` = cross-section at mid height |
@@ -236,19 +238,33 @@ The procedure is repeated on both halves.
   boundary shared between regions with the same angle and reports it in
   `summary.adjacency_conflicts`. This happens with non-rectangular shapes (T, large L,
   C), not with a rectangular specimen, where bisection gives slices in a row.
-- **Third angle, only where needed** (`--extra-angle`, usually `90`). If two angles are
-  not enough, the program looks for the 3-angle colouring that uses the third angle on
-  the **fewest regions** (ties: smallest area): exact branch and bound; on the shapes I
-  tried (T, Z, L, C) the third angle on 2–5 regions is enough. If two angles are
-  enough, the third never appears. Costs to know: between a region with the third angle
-  and its neighbours the difference is 45° and not 90°, so the alternation is weaker
-  there; and `0°` or `90°` are parallel and perpendicular to the X axis **of the part**.
-  If even three angles are not enough (very fragmented shapes, for example a triangle
-  split in many parts), conflicts remain, and they are listed in the report and in the
-  output.
-  In the JSON: `summary.extra_angle_regions` and, for each region, `extra_angle`; in the
-  PNG the regions with the third angle are green, with vertical hatching, and the legend
-  says "extra, only where needed".
+- **Extra angles, only where needed** (`--extra-angle 90` or `--extra-angle 90 0`). If
+  two angles are not enough, the program looks for the colouring that uses the fewest
+  distinct angles (three, and the fourth only if three are impossible) and, among those,
+  the **fewest regions** with an extra angle (ties: smallest area). It is a branch and
+  bound with the DSATUR rule and a limit on the nodes visited, so on large parts the
+  result is the best found, not a proof of optimality. If two angles are enough, the
+  extra ones never appear.
+  - *When three are not enough:* a region surrounded by an **odd** ring of neighbours
+    cannot be coloured with three angles (the neighbours would need two alternating
+    angles around an odd ring). The bisection of a curved or perforated part produces
+    such mosaics easily: on an S-shaped part of 40000 mm² (69 regions, 5 holes) there are
+    51 triangles of mutually adjacent regions and 16 of them are disjoint, so at least
+    16 regions need an extra angle whatever the algorithm; the program finds 18 with two
+    extra angles (four angles always suffice for a plane subdivision). Without the second
+    extra angle the program reports the conflicts and says what to add: it never
+    pretends it has resolved them.
+  - *Costs to know:* between a region with an extra angle and its neighbours the
+    difference is 45° and not 90°, so the alternation is weaker there; and `0°` or `90°`
+    are parallel and perpendicular to the X axis **of the part**.
+  - *`--min-contact`:* two regions that touch only along a few tenths of a millimetre are
+    a corner, not a shared edge, and the printed part does not notice a same-angle
+    contact there. Contacts shorter than `--min-contact` (default 1 mm) are therefore not
+    counted as neighbours. Raising it (3–5 mm) removes many triangles: on the S part, 3 mm
+    lets three angles suffice with 15 extra regions.
+  In the JSON: `summary.extra_angle_regions` and, for each region, `extra_angle` and
+  `extra_angle_level` (1 = first extra angle, 2 = second); in the PNG the extra angles
+  have their own colour and hatching, and the legend says "extra, only where needed".
 
 **Modifier STLs.**
 - Each modifier is the prism of the region, enlarged by `--margin-xy` **only on the
@@ -283,7 +299,9 @@ The tests cover:
 - rotation invariance, strict inequalities of the thresholds, long strips (8 regions);
 - exact partition (no uncovered or overlapping area) on generic shapes;
 - modifier coverage;
-- the third angle: only where needed, on the fewest regions (checked by brute force);
+- the extra angles: only where needed, on the fewest regions (checked by brute force on
+  a small shape; on the large S-shaped part against a lower bound), the fourth angle only
+  when three are impossible, and the report of the cases that remain unresolved;
 - full pipeline STL → JSON/PNG/STL;
 - STEP reading, skipped if `cadquery-ocp` is not installed;
 - `.3mf` export: comparison with a project saved by hand from Bambu Studio 2.08

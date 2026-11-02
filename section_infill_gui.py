@@ -182,20 +182,27 @@ class App(tk.Tk):
         self.extra_entry = self._row(t2, 5, "   Third angle [°]", "extra_angle", 10,
                                      hint="used on as few regions as possible")
         self.disable_when.append(("use_extra_angle", self.extra_entry))
-        ttk.Separator(t2).grid(row=6, column=0, columnspan=4, sticky="we", pady=10)
+        self._check(t2, 6, "Fourth angle, only if three are not enough", "use_extra_angle2")
+        self.extra_entry2 = self._row(t2, 7, "   Fourth angle [°]", "extra_angle2", 10,
+                                      hint="a region ringed by an odd number of neighbours "
+                                           "needs it")
+        self.disable_when.append(("use_extra_angle2", self.extra_entry2))
+        ttk.Separator(t2).grid(row=8, column=0, columnspan=4, sticky="we", pady=10)
         ttk.Label(t2, text="Advanced", font=("TkDefaultFont", 9, "bold")).grid(
-            row=7, column=0, sticky="w")
-        self._row(t2, 8, "Mode", "mode", 10, values=list(MODES),
+            row=9, column=0, sticky="w")
+        self._row(t2, 10, "Mode", "mode", 10, values=list(MODES),
                   hint="bisect = method of the paper; nsplit = EXPERIMENTAL, simple elongated shapes only")
-        self._row(t2, 9, "Footprint", "footprint", 10, values=list(FOOTPRINTS),
+        self._row(t2, 11, "Footprint", "footprint", 10, values=list(FOOTPRINTS),
                   hint="projection = shadow; section = cross-section at mid height")
-        self._row(t2, 10, "Minimum area [mm²]", "min_area", 10, hint="safety stop")
-        self._row(t2, 11, "Minimum region width [mm]", "min_width", 10,
+        self._row(t2, 12, "Minimum area [mm²]", "min_area", 10, hint="safety stop")
+        self._row(t2, 13, "Minimum region width [mm]", "min_width", 10,
                   hint="narrower slivers are merged into the neighbours; 0 = off")
-        self._row(t2, 12, "Maximum depth", "max_depth", 10)
-        self._row(t2, 13, "Modifier margin XY [mm]", "margin_xy", 10,
+        self._row(t2, 14, "Minimum shared edge [mm]", "min_contact", 10,
+                  hint="shorter contacts are corners: not neighbours when assigning angles")
+        self._row(t2, 15, "Maximum depth", "max_depth", 10)
+        self._row(t2, 16, "Modifier margin XY [mm]", "margin_xy", 10,
                   hint="overhang beyond the outer walls")
-        self._row(t2, 14, "Modifier margin Z [mm]", "margin_z", 10, hint="overhang above the part")
+        self._row(t2, 17, "Modifier margin Z [mm]", "margin_z", 10, hint="overhang above the part")
 
         # ---- tab 3: Bambu Studio -------------------------------------------
         t3.columnconfigure(1, weight=1)
@@ -282,7 +289,7 @@ class App(tk.Tk):
         s = self.get_state()
         for var, w in self.disable_when:
             on = bool(self.v[var].get()) and (
-                var in ("use_extra_angle",) or bool(self.v["export_3mf"].get()))
+                var in ("use_extra_angle", "use_extra_angle2") or bool(self.v["export_3mf"].get()))
             self._set_enabled(w, on)
         for w in self.bambu_widgets:
             if not any(w is x for _, x in self.disable_when):

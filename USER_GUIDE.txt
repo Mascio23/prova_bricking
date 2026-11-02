@@ -185,7 +185,12 @@ TAB 2 - SECTIONING
                       2.
   Angle 1, Angle 2    The two infill directions, alternated between neighbouring regions
                       (45 and 135). They are angles RELATIVE TO THE PART (see rotation).
-  Third angle         See recipe 5.5. Normally not needed.
+  Third angle,        See recipe 5.5. Normally not needed.
+  Fourth angle
+  Minimum shared      Default 1 mm. Two regions that touch along less than this are a
+  edge                corner, not a shared edge: they are not counted as neighbours when
+                      the angles are assigned. A larger value (3-5 mm) needs fewer extra
+                      angles.
   Mode                bisect = the method of the paper. nsplit = EXPERIMENTAL, divides
                       into N equal slabs (on the 100 x 20 specimen it gives 3 slabs of
                       33.3 mm). It is not the method of Shen et al.: do not cite it as
@@ -297,14 +302,25 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
      modifiers. Compare sectioned and non-sectioned at the same density and the same
      pattern, so that the only difference is the sectioning.
 
-5.5  IRREGULAR SHAPE: THIRD ANGLE
-     With non-rectangular shapes (T, large L, C, Z) two angles may not be enough: in some
-     places three regions touch each other. Tick "Third angle" and write for example 90.
-     The program uses the third angle ONLY where strictly needed and on the fewest
-     possible regions. If two angles are enough, the third does not appear. Where it
-     appears, the difference with the neighbouring regions is 45 degrees, not 90. If even
-     three angles are not enough (very fragmented shapes) conflicts remain, listed in the
-     log and in the report.
+5.5  IRREGULAR SHAPE: THIRD AND FOURTH ANGLE
+     With non-rectangular shapes (T, large L, C, Z, S, plates with holes) two angles may
+     not be enough: in some places three regions touch each other. Tick "Third angle" and
+     write for example 90. The program uses it ONLY where strictly needed and on the
+     fewest possible regions. If two angles are enough, it does not appear. Where it
+     appears, the difference with the neighbouring regions is 45 degrees, not 90.
+     On large curved or perforated parts (for example an S-shaped part of 40000 mm2 with
+     holes) three angles may still not be enough: a region surrounded by an ODD ring of
+     neighbours cannot be coloured with three. In that case the program does not hide it:
+     it prints "Three angles are not enough for this shape" and the pairs that still have
+     the same angle. Tick "Fourth angle" (for example 0, together with 90): it is used
+     only if three are impossible, and again on the fewest regions. Four angles always
+     suffice. Command line: --extra-angle 90 0.
+     Expect many regions with an extra angle on such parts (on that S part, 18 of 69 at
+     least 16 unavoidable): it is a property of the mosaic of regions, not a defect. To
+     reduce it, raise "Minimum shared edge" (3-5 mm: contacts shorter than that are
+     corners and are ignored; three angles then suffice, with 15 regions). The weaker
+     alternation (45 degrees between a region and its neighbours) must be declared in the
+     thesis.
 
 5.6  LEAVING THE INFILL AS IN THE TEMPLATE
      Untick "Set the sparse infill": the modifiers receive only the direction.
@@ -452,7 +468,8 @@ A warning about a pattern appears
   project is generated anyway.
 
 "adjacent regions with the same angle" (conflicts) in the log
-  Shape with T-junctions: use the third angle (recipe 5.5).
+  Shape with T-junctions: use the third angle (recipe 5.5). If it says "Three angles are
+  not enough", add the fourth: --extra-angle 90 0.
 
 The program says the rotated part leaves the printable area
   Reduce the rotation, use a smaller part, or check that the template is the one of your
@@ -491,7 +508,8 @@ Main options:
   --max-area MM2          maximum area of a region (default 900)
   --max-ar AR             maximum aspect ratio (default 2)
   --angles A1 A2          the two angles (default 45 135)
-  --extra-angle DEGREES   third angle, only where needed
+  --extra-angle DEG [DEG] one or two extra angles, only where needed (e.g. 90 0)
+  --min-contact MM        shorter contacts between regions are corners (default 1)
   --mode bisect|nsplit    bisect = method of the paper; nsplit = experimental
   --export-3mf            writes the Bambu Studio project
   --template-3mf FILE     project from which printer, filament, process are copied

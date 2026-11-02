@@ -36,11 +36,17 @@ def parse_args(argv=None):
                         "nsplit = EXPERIMENTAL equal-width N slabs, for comparison only")
     p.add_argument("--angles", type=float, nargs=2, default=[45.0, 135.0],
                    metavar=("A1", "A2"), help="the two infill angles [deg] (default 45 135)")
-    p.add_argument("--extra-angle", type=float, default=None, metavar="DEG",
-                   help="third infill angle [deg], used ONLY if two angles are not enough "
-                        "(T-junctions between regions) and then on as few regions as "
-                        "possible. Default: not used. Must differ from the two angles "
-                        "(e.g. 90)")
+    p.add_argument("--extra-angle", type=float, nargs="+", default=None, metavar="DEG",
+                   help="extra infill angle(s) [deg], one or two, used ONLY if two angles are "
+                        "not enough (T-junctions between regions) and then on as few regions "
+                        "as possible. The second one only if three angles are not enough "
+                        "(a region surrounded by an odd ring of neighbours needs four). "
+                        "Default: not used. All angles must differ (e.g. --extra-angle 90 0)")
+    p.add_argument("--min-contact", type=float, default=1.0, metavar="MM",
+                   help="two regions count as neighbours only if they share an edge at least "
+                        "this long [mm] (default 1): shorter contacts are corners, and they "
+                        "are ignored when the angles are assigned. A larger value needs fewer "
+                        "extra angles")
     p.add_argument("--min-area", type=float, default=1.0,
                    help="never create regions smaller than this [mm^2] (safety stop)")
     p.add_argument("--min-width", type=float, default=2.0, metavar="MM",
@@ -126,7 +132,7 @@ def run(args) -> dict:
         result = section(part, args.max_area, args.max_ar, mode=args.mode,
                          min_area=args.min_area, max_depth=args.max_depth,
                          angles=tuple(args.angles), extra_angle=args.extra_angle,
-                         min_width=args.min_width)
+                         min_width=args.min_width, min_contact=args.min_contact)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
 
@@ -142,7 +148,8 @@ def run(args) -> dict:
     params = {
         "mode": args.mode, "max_area_mm2": args.max_area, "max_ar": args.max_ar,
         "angles_deg": list(args.angles), "min_area_mm2": args.min_area,
-        "min_width_mm": args.min_width,
+        "min_width_mm": args.min_width, "min_contact_mm": args.min_contact,
+        "extra_angles_deg": args.extra_angle or [],
         "max_depth": args.max_depth, "footprint_method": args.footprint,
         "margin_xy_mm": args.margin_xy, "margin_z_mm": args.margin_z,
     }
@@ -254,15 +261,27 @@ def main(argv=None) -> int:
         print(f"  R{r['id']:<2d} angle={r['infill_angle_deg']:>5g}°  "
               f"area={r['area_mm2']:9.2f} mm²  AR={r['aspect_ratio']:5.2f}  "
               f"bbox={r['bbox']}")
+    extra = args.extra_angle or []
     if s["extra_angle_regions"]:
-        print(f"NOTE: two angles are not enough for this shape: the third angle "
-              f"({args.extra_angle:g} deg) is used only on regions "
-              f"{s['extra_angle_regions']}; there neighbours differ by less than 90 deg")
+        used = sorted({r["infill_angle_deg"] for r in report["regions"] if r["extra_angle"]})
+        print(f"NOTE: two angles are not enough for this shape: the extra angle(s) "
+              f"{', '.join(f'{a:g}' for a in used)} deg are used only on "
+              f"{len(s['extra_angle_regions'])} regions {s['extra_angle_regions']}; there "
+              "neighbours differ by less than 90 deg")
     if s["adjacency_conflicts"]:
-        print("WARNING: adjacent regions with the same angle:", s["adjacency_conflicts"])
-        if args.extra_angle is None:
-            print("  (T-junctions: use --extra-angle 90 to give a third angle to the "
-                  "fewest regions that need it)")
+        n = len(s["adjacency_conflicts"])
+        print(f"WARNING: {n} pairs of adjacent regions still have the same angle:",
+              [c["regions"] for c in s["adjacency_conflicts"]])
+        if not extra:
+            print("  Two angles are not enough here (T-junctions): add --extra-angle 90 to "
+                  "give a third angle to the fewest regions that need it.")
+        elif len(extra) == 1:
+            print("  Three angles are not enough for this shape (a region surrounded by an "
+                  f"odd ring of neighbours needs four): add a fourth, e.g. --extra-angle "
+                  f"{extra[0]:g} 0. Or raise --min-contact to ignore short contacts.")
+        else:
+            print("  Even four angles did not resolve it within the search limit: raise "
+                  "--min-contact to ignore short contacts.")
     if report["parameters"]["mode"] == "nsplit":
         print("NOTE: nsplit is EXPERIMENTAL and is not the method of Shen et al.")
     print(f"output written to {args.out_dir}")

@@ -50,6 +50,7 @@ class Region:
     cell: Polygon | None = None
     # True if this region got the optional third angle (see assign_angles)
     extra: bool = False
+    extra_level: int = 0  # 0 = one of the two main angles, 1 = first extra angle, 2 = second
 
     @property
     def area(self) -> float:
@@ -287,58 +288,77 @@ def build_adjacency(regions: list[Region], tol: float = 1e-4, min_len: float = 1
             b.neighbors[a.id] = shared
 
 
-def _min_extra_colouring(regions: list[Region], node_limit: int = 400_000):
-    """Proper 3-colouring of the adjacency graph that uses colour 2 on as few regions as
-    possible (ties: smallest total area). Colours 0/1 are the two main angles.
+def _min_extra_colouring(regions: list[Region], n_extra: int = 1, node_limit: int = 200_000):
+    """Proper colouring of the adjacency graph with 2 + n_extra colours that uses the extra
+    colours (2, and 3 if n_extra == 2) on as few regions as possible.
 
-    Branch and bound over a BFS order, with the first region of every component fixed
-    to colour 0 (the swap symmetry). Returns (colours, proven_minimal) or (None, False)
-    when no proper 3-colouring was found within `node_limit` search nodes."""
+    Cost, compared in this order: number of regions with an extra colour, number of those
+    with the second extra colour, their total area. Branch and bound with the DSATUR rule
+    (colour next the region whose neighbours already use the most colours), trying colours
+    0, 1, 2, 3 in this order: the first solution comes quickly and the search improves it
+    until it is complete or `node_limit` nodes have been visited.
+
+    Returns (colours, complete); colours is None if no proper colouring was found (for
+    n_extra == 1 the graph may simply need four colours)."""
     n = len(regions)
-    adj = [set(r.neighbors) for r in regions]
+    k = 2 + n_extra
+    adj = [list(r.neighbors) for r in regions]
     area = [r.area for r in regions]
-    order, seen = [], set()
-    for start in sorted(range(n), key=lambda i: -len(adj[i])):
-        if start in seen:
-            continue
-        queue = [start]
-        seen.add(start)
-        while queue:
-            i = queue.pop(0)
-            order.append(i)
-            for j in sorted(adj[i], key=lambda j: -len(adj[j])):
-                if j not in seen:
-                    seen.add(j)
-                    queue.append(j)
-    is_root = {order[0]} | {i for k, i in enumerate(order)
-                            if not any(j in adj[i] for j in order[:k])}
+    deg = [len(a) for a in adj]
     col = [-1] * n
-    best = {"cost": (n + 1, 0.0), "col": None}
+    seen = [[0] * k for _ in range(n)]  # seen[v][c]: neighbours of v coloured c
+    ndist = [0] * n                     # distinct colours among the neighbours of v
+    todo = set(range(n))
+    best = {"cost": (n + 1, n + 1, 0.0), "col": None}
     nodes = [0]
 
-    def rec(k, count, extra_area):
-        if (count, extra_area) >= best["cost"]:
+    def paint(v, c, sign):
+        col[v] = c if sign > 0 else -1
+        for u in adj[v]:
+            before = seen[u][c]
+            seen[u][c] += sign
+            if sign > 0 and before == 0:
+                ndist[u] += 1
+            elif sign < 0 and before == 1:
+                ndist[u] -= 1
+
+    def rec(count, count3, extra_area):
+        if (count, count3, extra_area) >= best["cost"]:
             return
         nodes[0] += 1
         if nodes[0] > node_limit:
             return
-        if k == n:
-            best["cost"], best["col"] = (count, extra_area), col[:]
+        if not todo:
+            best["cost"], best["col"] = (count, count3, extra_area), col[:]
             return
-        i = order[k]
-        used = {col[j] for j in adj[i] if col[j] >= 0}
-        for c in ((0,) if i in is_root else (0, 1, 2)):
-            if c in used:
+        v = max(todo, key=lambda u: (ndist[u], deg[u]))
+        root = ndist[v] == 0  # no coloured neighbour: first of its component (swap 0 <-> 1)
+        todo.discard(v)
+        for c in ((0,) if root else range(k)):
+            if seen[v][c]:
                 continue
-            col[i] = c
-            rec(k + 1, count + (c == 2), extra_area + (area[i] if c == 2 else 0.0))
-            col[i] = -1
+            paint(v, c, +1)
+            rec(count + (c >= 2), count3 + (c == 3), extra_area + (area[v] if c >= 2 else 0.0))
+            paint(v, c, -1)
+        todo.add(v)
 
     rec(0, 0, 0.0)
     return best["col"], nodes[0] <= node_limit
 
 
-def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle: float | None = None):
+def _extra_list(extra_angle) -> list[float]:
+    """None, one angle or a sequence of up to two angles -> list of floats."""
+    if extra_angle is None:
+        return []
+    if isinstance(extra_angle, (int, float)):
+        return [float(extra_angle)]
+    out = [float(a) for a in extra_angle]
+    if len(out) > 2:
+        raise ValueError("at most two extra angles are supported")
+    return out
+
+
+def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle=None):
     """Give every region one of two angles so that neighbours differ (2-colouring of the
     adjacency graph); returns the list of conflicting edges (same angle on a shared edge).
 
@@ -348,8 +368,9 @@ def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle: floa
     `extra_angle=None` the assignment with the least shared edge length is kept and its
     conflicts are returned."""
     n = len(regions)
+    extras = _extra_list(extra_angle)
     for r in regions:
-        r.extra = False
+        r.extra, r.extra_level = False, 0
     edges = [(a.id, b_id, w) for a in regions for b_id, w in a.neighbors.items()
              if a.id < b_id]
 
@@ -392,21 +413,32 @@ def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle: floa
                 else:
                     col[i] = 1 - col[i]
     conflicts = [(i, j, w) for i, j, w in edges if col[i] == col[j]]
-    if conflicts and extra_angle is not None:
-        col3, _ = _min_extra_colouring(regions)
-        if col3 is not None:
-            col, conflicts = col3, []
-    palette = (float(angles[0]), float(angles[1]), None if extra_angle is None else float(extra_angle))
+    if conflicts and extras:
+        # as few distinct angles as possible: the second extra angle only if three are
+        # not enough, and then the fewest regions with an extra angle
+        for m in range(1, len(extras) + 1):
+            col_x, _ = _min_extra_colouring(regions, m)
+            if col_x is not None:
+                col, conflicts = col_x, []
+                break
+    palette = [float(angles[0]), float(angles[1])] + extras
     for r in regions:
         r.angle = palette[col[r.id]]
-        r.extra = col[r.id] == 2
+        r.extra, r.extra_level = col[r.id] >= 2, max(0, col[r.id] - 1)
     return conflicts
 
 
 def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bisect",
             min_area: float = 1.0, max_depth: int = 12, angles=(45.0, 135.0),
-            max_pieces: int = 64, extra_angle: float | None = None,
-            min_width: float = 2.0) -> SectioningResult:
+            max_pieces: int = 64, extra_angle=None,
+            min_width: float = 2.0, min_contact: float = 1.0) -> SectioningResult:
+    extras = _extra_list(extra_angle)
+    every = [float(a) for a in angles] + extras
+    for i, a in enumerate(every):
+        for b in every[:i]:
+            if abs(((a - b + 90) % 180) - 90) < 1e-6:
+                raise ValueError(f"the angles {b:g} and {a:g} coincide: the two main angles and "
+                                 "the extra angles must all differ (angles are taken modulo 180)")
     part_m = polygon_moments(part)
     if mode == "bisect":
         regions, cuts = bisect_regions(part, max_area, max_ar, min_area, max_depth, min_width)
@@ -423,12 +455,8 @@ def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bis
                                 round(float((r.moments.centroid - part_m.centroid) @ ay), 6)))
     for i, r in enumerate(regions):
         r.id = i
-    build_adjacency(regions)
-    if extra_angle is not None and any(
-            abs(((extra_angle - a + 90) % 180) - 90) < 1e-6 for a in angles):
-        raise ValueError(f"the extra angle ({extra_angle:g}) must differ from {angles[0]:g} "
-                         f"and {angles[1]:g} (angles are taken modulo 180)")
-    conflicts = assign_angles(regions, angles, extra_angle)
+    build_adjacency(regions, min_len=min_contact)
+    conflicts = assign_angles(regions, angles, extras)
     return SectioningResult(part, part_m, regions, cuts, conflicts, mode)
 
 
