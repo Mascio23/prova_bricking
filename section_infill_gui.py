@@ -4,8 +4,10 @@
     python section_infill_gui.py
 
 Choose the model, tick the options you want, fill in the fields, look at the
-regions with "Anteprima", then "Genera" writes the files (and the Bambu Studio
-project). The command shown at the bottom is the equivalent terminal command.
+regions with "Preview regions", then "Generate" writes the files (and the Bambu
+Studio project). The command shown at the bottom is the equivalent terminal command.
+
+In Visual Studio Code: open this file and press the Run button (top right), or F5.
 """
 
 from __future__ import annotations
@@ -19,13 +21,33 @@ import sys
 import tempfile
 import threading
 import traceback
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
 
-import section_infill
-from infill_sectioning.bambu3mf import pattern_names
-from infill_sectioning.gui_model import FOOTPRINTS, MODES, FormState
+from infill_sectioning import deps
+
+
+def _startup_check() -> None:
+    """Explain what is missing (instead of a traceback) before the heavy imports."""
+    try:
+        __import__("tkinter")
+    except ImportError:
+        print(deps.tkinter_message(), file=sys.stderr)
+        sys.exit(1)
+    missing = deps.missing_dependencies()
+    if missing:
+        deps.show_error("Missing libraries", deps.install_message(missing))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    _startup_check()
+
+import tkinter as tk  # noqa: E402
+from tkinter import filedialog, messagebox, ttk  # noqa: E402
+
+import section_infill  # noqa: E402
+from infill_sectioning.bambu3mf import pattern_names  # noqa: E402
+from infill_sectioning.gui_model import FOOTPRINTS, MODES, FormState  # noqa: E402
 
 LAST_STATE = Path.home() / ".infill_sectioning_gui.json"
 PREVIEW_WIDTH = 620  # only used if Pillow is missing (it comes with matplotlib)
@@ -49,7 +71,7 @@ class _QueueWriter:
 class App(tk.Tk):
     def __init__(self, state: FormState | None = None):
         super().__init__()
-        self.title("Sezionamento dell'infill (Shen, Veeramani, Qin 2026)")
+        self.title("Infill sectioning (Shen, Veeramani, Qin 2026)")
         self.geometry("1260x780")
         self.minsize(1100, 720)
         self.q: queue.Queue = queue.Queue()
@@ -103,7 +125,7 @@ class App(tk.Tk):
             w = ttk.Entry(parent, textvariable=self._var(key), width=width)
         w.grid(row=r, column=1, sticky="we" if browse else "w", pady=3)
         if browse:
-            ttk.Button(parent, text="Sfoglia…", command=lambda: browse(key)).grid(
+            ttk.Button(parent, text="Browse…", command=lambda: browse(key)).grid(
                 row=r, column=2, padx=(6, 0))
         if hint:
             ttk.Label(parent, text=hint, foreground="#666", wraplength=230,
@@ -126,77 +148,77 @@ class App(tk.Tk):
         nb = ttk.Notebook(left)
         nb.pack(fill="both", expand=True)
         t1, t2, t3 = (ttk.Frame(nb, padding=12) for _ in range(3))
-        nb.add(t1, text=" 1. Pezzo e file ")
-        nb.add(t2, text=" 2. Sezionamento ")
-        nb.add(t3, text=" 3. Progetto Bambu Studio ")
+        nb.add(t1, text=" 1. Part and files ")
+        nb.add(t2, text=" 2. Sectioning ")
+        nb.add(t3, text=" 3. Bambu Studio project ")
 
         # ---- tab 1: files -----------------------------------------------
         t1.columnconfigure(1, weight=1)
-        self._row(t1, 0, "Modello (STL o STEP)", "model", width=34, browse=self._pick_model)
-        self._row(t1, 1, "Cartella di output", "out_dir", width=34, browse=self._pick_dir)
-        self._row(t1, 2, "Prefisso dei file", "prefix", width=18,
-                  hint="vuoto = nome del modello")
+        self._row(t1, 0, "Model (STL or STEP)", "model", width=34, browse=self._pick_model)
+        self._row(t1, 1, "Output folder", "out_dir", width=34, browse=self._pick_dir)
+        self._row(t1, 2, "File prefix", "prefix", width=18,
+                  hint="empty = name of the model")
         ttk.Separator(t1).grid(row=3, column=0, columnspan=4, sticky="we", pady=10)
-        ttk.Label(t1, text="Cosa scrivere (il report JSON c'è sempre):").grid(
+        ttk.Label(t1, text="What to write (the JSON report is always written):").grid(
             row=4, column=0, columnspan=4, sticky="w")
-        self._check(t1, 5, "Immagine PNG con le regioni", "write_png")
-        self._check(t1, 6, "Un file STL per ogni regione (modifier)", "write_stl")
-        self._check(t1, 7, "Progetto Bambu Studio (.3mf) con pezzo e modifier già configurati",
+        self._check(t1, 5, "PNG image with the regions", "write_png")
+        self._check(t1, 6, "One STL file per region (modifiers)", "write_stl")
+        self._check(t1, 7, "Bambu Studio project (.3mf) with part and modifiers already set up",
                     "export_3mf")
-        ttk.Label(t1, text="Gli STL servono anche per il .3mf: con il .3mf spuntato vengono "
-                  "comunque scritti.", foreground="#666", wraplength=420).grid(
+        ttk.Label(t1, text="The STLs are also needed for the .3mf: they are written anyway "
+                  "when the .3mf is ticked.", foreground="#666", wraplength=420).grid(
             row=8, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
         # ---- tab 2: sectioning -------------------------------------------
-        self._row(t2, 0, "Area massima [mm²]", "max_area", 10,
-                  hint="si taglia se l'area la supera…")
-        self._row(t2, 1, "Aspect ratio massimo", "max_ar", 10, hint="…o se l'AR la supera")
-        self._row(t2, 2, "Angolo 1 [°]", "angle1", 10)
-        self._row(t2, 3, "Angolo 2 [°]", "angle2", 10, hint="alternati tra regioni vicine")
-        self._check(t2, 4, "Terzo angolo, solo dove due non bastano (giunzioni a T)",
+        self._row(t2, 0, "Maximum area [mm²]", "max_area", 10,
+                  hint="a region is cut if its area exceeds this…")
+        self._row(t2, 1, "Maximum aspect ratio", "max_ar", 10, hint="…or if its aspect ratio exceeds this")
+        self._row(t2, 2, "Angle 1 [°]", "angle1", 10)
+        self._row(t2, 3, "Angle 2 [°]", "angle2", 10, hint="alternated between neighbouring regions")
+        self._check(t2, 4, "Third angle, only where two are not enough (T-junctions)",
                     "use_extra_angle")
-        self.extra_entry = self._row(t2, 5, "   Terzo angolo [°]", "extra_angle", 10,
-                                     hint="usato sul minor numero di regioni")
+        self.extra_entry = self._row(t2, 5, "   Third angle [°]", "extra_angle", 10,
+                                     hint="used on as few regions as possible")
         self.disable_when.append(("use_extra_angle", self.extra_entry))
         ttk.Separator(t2).grid(row=6, column=0, columnspan=4, sticky="we", pady=10)
-        ttk.Label(t2, text="Avanzate", font=("TkDefaultFont", 9, "bold")).grid(
+        ttk.Label(t2, text="Advanced", font=("TkDefaultFont", 9, "bold")).grid(
             row=7, column=0, sticky="w")
-        self._row(t2, 8, "Modalità", "mode", 10, values=list(MODES),
-                  hint="bisect = metodo del paper; nsplit = SPERIMENTALE")
-        self._row(t2, 9, "Sagoma", "footprint", 10, values=list(FOOTPRINTS),
-                  hint="projection = ombra; section = sezione a metà altezza")
-        self._row(t2, 10, "Area minima [mm²]", "min_area", 10, hint="blocco di sicurezza")
-        self._row(t2, 11, "Profondità massima", "max_depth", 10)
-        self._row(t2, 12, "Margine modifier XY [mm]", "margin_xy", 10,
-                  hint="sporgenza oltre le pareti esterne")
-        self._row(t2, 13, "Margine modifier Z [mm]", "margin_z", 10, hint="sporgenza sopra il pezzo")
+        self._row(t2, 8, "Mode", "mode", 10, values=list(MODES),
+                  hint="bisect = method of the paper; nsplit = EXPERIMENTAL")
+        self._row(t2, 9, "Footprint", "footprint", 10, values=list(FOOTPRINTS),
+                  hint="projection = shadow; section = cross-section at mid height")
+        self._row(t2, 10, "Minimum area [mm²]", "min_area", 10, hint="safety stop")
+        self._row(t2, 11, "Maximum depth", "max_depth", 10)
+        self._row(t2, 12, "Modifier margin XY [mm]", "margin_xy", 10,
+                  hint="overhang beyond the outer walls")
+        self._row(t2, 13, "Modifier margin Z [mm]", "margin_z", 10, hint="overhang above the part")
 
         # ---- tab 3: Bambu Studio -------------------------------------------
         t3.columnconfigure(1, weight=1)
         self.tpl_entry = self._row(t3, 0, "Template (.3mf)", "template",
                                    width=30, browse=self._pick_template)
-        ttk.Label(t3, text="Stampante, filamento e processo vengono copiati da qui "
-                  "(File → Save Project As…, non .gcode.3mf).", foreground="#666",
+        ttk.Label(t3, text="Printer, filament and process are copied from here "
+                  "(File → Save Project As…, not .gcode.3mf).", foreground="#666",
                   wraplength=460).grid(row=1, column=0, columnspan=4, sticky="w")
         ttk.Separator(t3).grid(row=2, column=0, columnspan=4, sticky="we", pady=10)
-        self._check(t3, 3, "Imposta l'infill sparso in ogni modifier (altrimenti resta quello "
-                    "del template)", "set_infill")
-        self.density_entry = self._row(t3, 4, "   Densità [%]", "density", 8,
-                                       hint="100 = pieno. I layer solidi restano alternati")
+        self._check(t3, 3, "Set the sparse infill in every modifier (otherwise the "
+                    "template's stays)", "set_infill")
+        self.density_entry = self._row(t3, 4, "   Density [%]", "density", 8,
+                                       hint="100 = solid. The solid layers stay alternated")
         self.pattern_entry = self._row(t3, 5, "   Pattern", "pattern", 20, values=pattern_names(),
-                                       hint="rectilinear = verificato sul G-code")
+                                       hint="rectilinear = verified on the G-code")
         self.disable_when += [("set_infill", self.density_entry),
                               ("set_infill", self.pattern_entry)]
-        self._check(t3, 6, "Ruota il pezzo sul piatto (gli angoli restano 45°/135° rispetto "
-                    "al pezzo)", "use_rotation")
-        self.rot_entry = self._row(t3, 7, "   Rotazione [°]", "rotation", 8,
-                                   hint="antiorario; diagonale H2D ≈ 42.4")
+        self._check(t3, 6, "Rotate the part on the plate (angles stay 45°/135° relative "
+                    "to the part)", "use_rotation")
+        self.rot_entry = self._row(t3, 7, "   Rotation [°]", "rotation", 8,
+                                   hint="counter-clockwise; H2D diagonal ≈ 42.4")
         self.disable_when.append(("use_rotation", self.rot_entry))
-        ttk.Label(t3, text="Altre impostazioni dei modifier, una per riga (CHIAVE=VALORE):"
+        ttk.Label(t3, text="Other modifier settings, one per line (KEY=VALUE):"
                   ).grid(row=8, column=0, columnspan=4, sticky="w", pady=(10, 2))
         self.settings_text = tk.Text(t3, height=5, width=44)
         self.settings_text.grid(row=9, column=0, columnspan=4, sticky="we")
-        ttk.Label(t3, text="per esempio  top_shell_layers=7   (prevalgono sulle altre opzioni)",
+        ttk.Label(t3, text="for example  top_shell_layers=7   (they override the other options)",
                   foreground="#666").grid(row=10, column=0, columnspan=4, sticky="w")
         self.bambu_widgets = [self.tpl_entry, self.density_entry, self.pattern_entry,
                               self.rot_entry, self.settings_text]
@@ -210,45 +232,45 @@ class App(tk.Tk):
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.canvas.bind("<Configure>", lambda _e: self._schedule_redraw())
         self.canvas.create_text(20, 20, anchor="nw", fill="#888", tags="hint",
-                                text="Premi «Anteprima» per vedere le regioni\n"
-                                     "prima di scrivere i file.")
+                                text="Press \"Preview regions\" to see the regions\n"
+                                     "before any file is written.")
         self.log = tk.Text(right, height=9, state="disabled", wrap="word", bg="#f7f7f5")
         self.log.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
 
         # ---- bottom: command + buttons --------------------------------------
         bottom = ttk.Frame(self)
         bottom.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Label(bottom, text="Comando equivalente:").pack(anchor="w")
+        ttk.Label(bottom, text="Equivalent command:").pack(anchor="w")
         self.cmd = tk.Text(bottom, height=3, wrap="word", bg="#f7f7f5", state="disabled")
         self.cmd.pack(fill="x")
         bar = ttk.Frame(bottom)
         bar.pack(fill="x", pady=(6, 0))
-        self.btn_prev = ttk.Button(bar, text="Anteprima regioni", command=self.preview)
-        self.btn_gen = ttk.Button(bar, text="Genera", command=self.generate)
+        self.btn_prev = ttk.Button(bar, text="Preview regions", command=self.preview)
+        self.btn_gen = ttk.Button(bar, text="Generate", command=self.generate)
         self.btn_prev.pack(side="left")
         self.btn_gen.pack(side="left", padx=6)
-        ttk.Button(bar, text="Apri cartella di output", command=self.open_out).pack(side="left")
-        ttk.Button(bar, text="Copia comando", command=self.copy_cmd).pack(side="right")
-        ttk.Button(bar, text="Carica preset…", command=self.load_preset).pack(side="right", padx=6)
-        ttk.Button(bar, text="Salva preset…", command=self.save_preset).pack(side="right")
+        ttk.Button(bar, text="Open output folder", command=self.open_out).pack(side="left")
+        ttk.Button(bar, text="Copy command", command=self.copy_cmd).pack(side="right")
+        ttk.Button(bar, text="Load preset…", command=self.load_preset).pack(side="right", padx=6)
+        ttk.Button(bar, text="Save preset…", command=self.save_preset).pack(side="right")
         self.status = ttk.Label(bottom, text="", foreground="#444")
         self.status.pack(anchor="w", pady=(4, 0))
 
     # ------------------------------------------------------------- callbacks
     def _pick_model(self, key):
-        p = filedialog.askopenfilename(title="Modello 3D", filetypes=[
-            ("Modelli 3D", "*.stl *.step *.stp *.obj *.ply *.3mf"), ("Tutti i file", "*.*")])
+        p = filedialog.askopenfilename(title="3D model", filetypes=[
+            ("3D models", "*.stl *.step *.stp *.obj *.ply *.3mf"), ("All files", "*.*")])
         if p:
             self.v[key].set(p)
 
     def _pick_template(self, key):
-        p = filedialog.askopenfilename(title="Progetto Bambu Studio (.3mf)", filetypes=[
-            ("Progetto Bambu Studio", "*.3mf"), ("Tutti i file", "*.*")])
+        p = filedialog.askopenfilename(title="Bambu Studio project (.3mf)", filetypes=[
+            ("Bambu Studio project", "*.3mf"), ("All files", "*.*")])
         if p:
             self.v[key].set(p)
 
     def _pick_dir(self, key):
-        p = filedialog.askdirectory(title="Cartella di output")
+        p = filedialog.askdirectory(title="Output folder")
         if p:
             self.v[key].set(p)
 
@@ -266,7 +288,7 @@ class App(tk.Tk):
         try:
             self.cmd.insert("1.0", s.command())
         except ValueError:  # a number is being typed
-            self.cmd.insert("1.0", "(compila i campi numerici per vedere il comando)")
+            self.cmd.insert("1.0", "(fill in the numeric fields to see the command)")
         self.cmd.configure(state="disabled")
 
     @staticmethod
@@ -282,7 +304,7 @@ class App(tk.Tk):
         s = self.get_state()
         problems = s.validate()
         if problems:
-            messagebox.showerror("Controlla i campi", "\n".join(f"• {p}" for p in problems))
+            messagebox.showerror("Check the fields", "\n".join(f"• {p}" for p in problems))
             return None
         return s
 
@@ -316,20 +338,20 @@ class App(tk.Tk):
         if self.busy or not (s := self._check_form()):
             return
         self._clear_log()
-        self._set_busy(True, "Calcolo delle regioni…")
+        self._set_busy(True, "Computing the regions…")
         self._run(s.to_argv(preview_dir=self.tmp.name), "preview")
 
     def generate(self):
         if self.busy or not (s := self._check_form()):
             return
         if s.export_3mf and not s.template.strip() and not messagebox.askyesno(
-                "Nessun template",
-                "Non hai scelto un template: il .3mf non conterrà stampante, filamento e "
-                "processo, e Bambu Studio userà i preset selezionati in quel momento.\n\n"
-                "Continuare?"):
+                "No template",
+                "No template chosen: the .3mf will not contain printer, filament and "
+                "process, and Bambu Studio will use the presets selected at that moment.\n\n"
+                "Continue?"):
             return
         self._clear_log()
-        self._set_busy(True, "Scrittura dei file…")
+        self._set_busy(True, "Writing the files…")
         self._run(s.to_argv(), "generate")
 
     def _clear_log(self):
@@ -356,9 +378,9 @@ class App(tk.Tk):
         if kind == "preview" and ok:
             self._show_preview()
         out = self.get_state().out_dir
-        self._set_busy(False, ("Fatto: file scritti in " + out) if ok and kind == "generate"
-                       else "Anteprima pronta (nessun file scritto)" if ok else
-                       "Errore: vedi il messaggio nel riquadro in basso a destra")
+        self._set_busy(False, ("Done: files written to " + out) if ok and kind == "generate"
+                       else "Preview ready (no file written)" if ok else
+                       "Error: see the message in the box at the bottom right")
 
     def _show_preview(self):
         pngs = sorted(Path(self.tmp.name).glob("*_sections.png"), key=os.path.getmtime)
@@ -408,25 +430,25 @@ class App(tk.Tk):
     def copy_cmd(self):
         self.clipboard_clear()
         self.clipboard_append(self.get_state().command())
-        self.status.configure(text="Comando copiato negli appunti")
+        self.status.configure(text="Command copied to the clipboard")
 
     def save_preset(self):
         p = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("Preset", "*.json")],
-                                         title="Salva preset")
+                                         title="Save preset")
         if p:
             self.get_state().save(p)
-            self.status.configure(text=f"Preset salvato: {p}")
+            self.status.configure(text=f"Preset saved: {p}")
 
     def load_preset(self):
-        p = filedialog.askopenfilename(filetypes=[("Preset", "*.json")], title="Carica preset")
+        p = filedialog.askopenfilename(filetypes=[("Preset", "*.json")], title="Load preset")
         if p:
             try:
                 self.set_state(FormState.load(p))
             except (OSError, ValueError, json.JSONDecodeError) as exc:
-                messagebox.showerror("Preset non valido", str(exc))
+                messagebox.showerror("Invalid preset", str(exc))
                 return
             self._on_change()
-            self.status.configure(text=f"Preset caricato: {p}")
+            self.status.configure(text=f"Preset loaded: {p}")
 
     def _close(self):
         with contextlib.suppress(Exception):

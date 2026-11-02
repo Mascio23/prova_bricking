@@ -92,69 +92,69 @@ class FormState:
 
     # ---- validation ------------------------------------------------------
     def validate(self, check_files: bool = True) -> list[str]:
-        """Human readable problems (Italian); empty list if the form is fine."""
+        """Human readable problems; empty list if the form is fine."""
         err = []
 
         def number(label, text, lo=None, hi=None, lo_open=False, integer=False):
             try:
                 v = self.num(text)
             except ValueError:
-                err.append(f"{label}: «{text}» non è un numero")
+                err.append(f"{label}: \"{text}\" is not a number")
                 return None
             if not math.isfinite(v):
-                err.append(f"{label}: valore non valido")
+                err.append(f"{label}: not a valid value")
                 return None
             if integer and v != int(v):
-                err.append(f"{label}: deve essere un numero intero")
+                err.append(f"{label}: must be a whole number")
             if lo is not None and (v <= lo if lo_open else v < lo):
-                err.append(f"{label}: deve essere {'maggiore di' if lo_open else 'almeno'} {lo:g}")
+                err.append(f"{label}: must be {'greater than' if lo_open else 'at least'} {lo:g}")
             if hi is not None and v > hi:
-                err.append(f"{label}: al massimo {hi:g}")
+                err.append(f"{label}: at most {hi:g}")
             return v
 
         if not self.model.strip():
-            err.append("Modello: scegli il file STL o STEP")
+            err.append("Model: choose the STL or STEP file")
         elif check_files and not Path(self.model).is_file():
-            err.append(f"Modello: il file non esiste ({self.model})")
+            err.append(f"Model: the file does not exist ({self.model})")
         if not self.out_dir.strip():
-            err.append("Cartella di output: è vuota")
-        number("Area massima", self.max_area, 0, lo_open=True)
-        number("Aspect ratio massimo", self.max_ar, 1)
-        a1 = number("Angolo 1", self.angle1)
-        a2 = number("Angolo 2", self.angle2)
+            err.append("Output folder: it is empty")
+        number("Maximum area", self.max_area, 0, lo_open=True)
+        number("Maximum aspect ratio", self.max_ar, 1)
+        a1 = number("Angle 1", self.angle1)
+        a2 = number("Angle 2", self.angle2)
         if a1 is not None and a2 is not None and abs(((a1 - a2 + 90) % 180) - 90) < 1e-6:
-            err.append("Angolo 1 e angolo 2 coincidono (gli angoli valgono modulo 180°)")
+            err.append("Angle 1 and angle 2 coincide (angles are taken modulo 180 degrees)")
         if self.use_extra_angle:
-            e = number("Terzo angolo", self.extra_angle)
-            for name, a in (("angolo 1", a1), ("angolo 2", a2)):
+            e = number("Third angle", self.extra_angle)
+            for name, a in (("angle 1", a1), ("angle 2", a2)):
                 if e is not None and a is not None and abs(((e - a + 90) % 180) - 90) < 1e-6:
-                    err.append(f"Terzo angolo: coincide con l'{name}")
-        number("Area minima", self.min_area, 0)
-        number("Profondità massima", self.max_depth, 1, integer=True)
-        number("Margine XY", self.margin_xy, 0)
-        number("Margine Z", self.margin_z, 0)
-        number("Tolleranza STEP", self.step_tolerance, 0, lo_open=True)
-        number("Pixel del controllo raster", self.raster_pixel, 0)
-        number("Risoluzione PNG", self.png_dpi, 20, integer=True)
+                    err.append(f"Third angle: coincides with {name}")
+        number("Minimum area", self.min_area, 0)
+        number("Maximum depth", self.max_depth, 1, integer=True)
+        number("Modifier margin XY", self.margin_xy, 0)
+        number("Modifier margin Z", self.margin_z, 0)
+        number("STEP tolerance", self.step_tolerance, 0, lo_open=True)
+        number("Raster check pixel", self.raster_pixel, 0)
+        number("PNG resolution", self.png_dpi, 20, integer=True)
         if self.mode not in MODES:
-            err.append(f"Modalità: «{self.mode}» non valida")
+            err.append(f"Mode: \"{self.mode}\" is not valid")
         if self.footprint not in FOOTPRINTS:
-            err.append(f"Sagoma: «{self.footprint}» non valida")
+            err.append(f"Footprint: \"{self.footprint}\" is not valid")
 
         if self.export_3mf:
             if self.template.strip() and check_files and not Path(self.template).is_file():
-                err.append(f"Template: il file non esiste ({self.template})")
+                err.append(f"Template: the file does not exist ({self.template})")
             if self.set_infill:
-                number("Densità infill sparso", self.density, 0, 100)
+                number("Sparse infill density", self.density, 0, 100)
                 try:
                     pattern_key(self.pattern)
                 except ValueError as exc:
                     err.append(f"Pattern: {exc}")
             if self.use_rotation:
-                number("Rotazione sul piatto", self.rotation)
+                number("Rotation on the plate", self.rotation)
             for ln in self.extra_setting_lines():
                 if "=" not in ln or not ln.split("=", 1)[0].strip():
-                    err.append(f"Impostazioni extra: «{ln}» non è nella forma CHIAVE=VALORE")
+                    err.append(f"Extra settings: \"{ln}\" is not in the form KEY=VALUE")
         return err
 
     # ---- command line ------------------------------------------------------

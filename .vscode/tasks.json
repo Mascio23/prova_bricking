@@ -1,0 +1,33 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Install dependencies",
+            "detail": "pip install -r requirements.txt for the interpreter selected in VS Code",
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "pip", "install", "-r", "${workspaceFolder}/requirements.txt"],
+            "problemMatcher": [],
+            "presentation": {"reveal": "always", "panel": "dedicated", "clear": true}
+        },
+        {
+            "label": "Open the GUI",
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": ["${workspaceFolder}/section_infill_gui.py"],
+            "options": {"cwd": "${workspaceFolder}"},
+            "problemMatcher": [],
+            "presentation": {"reveal": "silent", "panel": "dedicated"}
+        },
+        {
+            "label": "Run the tests",
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "pytest", "-q", "tests"],
+            "options": {"cwd": "${workspaceFolder}"},
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {"reveal": "always", "panel": "dedicated", "clear": true}
+        }
+    ]
+}

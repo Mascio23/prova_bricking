@@ -1,119 +1,154 @@
-# prova_bricking: sezionamento dell'infill contro il warping
+# prova_bricking: infill sectioning against warping
 
-Implementazione in Python del criterio di sezionamento dell'infill proposto da
+Python implementation of the infill sectioning criterion proposed by
 **Shen, Veeramani, Qin (2026)**, *"Warpage mitigation through infill sectioning in
 fused filament fabrication"*, IISE Transactions 58(1):57-69.
 
-Il programma legge un modello 3D di un pezzo **2.5D** (sezione costante lungo Z:
-piastre, provini, chiavi) in formato STL o STEP e fa quanto segue:
+The program reads the 3D model of a **2.5D** part (constant cross-section along Z:
+plates, test specimens, wrenches) as STL or STEP and does the following:
 
-1. estrae la sagoma XY (footprint) del pezzo;
-2. ne calcola i momenti d'immagine: area, baricentro, assi principali ed ellisse
-   equivalente, con aspect ratio AR = asse maggiore / asse minore;
-3. biseca ricorsivamente la sagoma **lungo l'asse minore, passando per il
-   baricentro**, finché ogni sotto-regione ha `area ≤ max_area` **e** `AR ≤ max_ar`;
-4. assegna a regioni adiacenti angoli di infill alternati (45°/135°);
-5. scrive un report JSON, un'immagine PNG di controllo e **un file STL per ogni
-   sotto-regione**, da usare come *modifier* in Bambu Studio;
-6. con `--export-3mf`, scrive anche un **progetto Bambu Studio (.3mf) pronto**:
-   pezzo e modifier già assemblati, modifier già di tipo "Modifier" e
-   `infill_direction` già impostato (45°/135° alternati).
+1. extracts the XY footprint of the part;
+2. computes its image moments: area, centroid, principal axes and equivalent
+   ellipse, with aspect ratio AR = major axis / minor axis;
+3. recursively bisects the footprint **along the minor axis, through the centroid**,
+   until every sub-region has `area ≤ max_area` **and** `AR ≤ max_ar`;
+4. gives neighbouring regions alternating infill angles (45°/135°);
+5. writes a JSON report, a PNG check image and **one STL file per sub-region**, to be
+   used as *modifiers* in Bambu Studio;
+6. with `--export-3mf`, also writes a **ready Bambu Studio project (.3mf)**: part and
+   modifiers already assembled, modifiers already of type "Modifier", and
+   `infill_direction` already set (alternating 45°/135°).
 
-**Guida all'uso passo per passo, ricette e problemi frequenti: [GUIDA_USO.txt](GUIDA_USO.txt).**
+**Step-by-step guide, recipes and troubleshooting: [USER_GUIDE.txt](USER_GUIDE.txt)**
+(Italian version: [GUIDA_USO.txt](GUIDA_USO.txt)).
 
-![provino 100×20](docs/esempio_provino.png)
-![chiave](docs/esempio_chiave.png)
+![100×20 specimen](docs/esempio_provino.png)
+![wrench](docs/esempio_chiave.png)
 
 ---
 
-## Installazione
+## Installation
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install cadquery-ocp         # solo per leggere file STEP (kernel OpenCascade)
+pip install cadquery-ocp         # only to read STEP files (OpenCascade kernel)
 ```
 
-Serve Python ≥ 3.10. `cadquery-ocp` è opzionale: senza, lo script funziona
-comunque su STL, OBJ, PLY, 3MF e simili.
+Python ≥ 3.10 is required. `cadquery-ocp` is optional: without it the program still
+works on STL, OBJ, PLY, 3MF and similar files.
 
-## Interfaccia grafica
+## Graphical interface
 
-Se non vuoi scrivere i comandi:
+If you prefer not to type commands:
 
 ```bash
 python section_infill_gui.py
 ```
 
-![interfaccia, scheda Bambu Studio](docs/gui_bambu.png)
+![interface, Bambu Studio tab](docs/gui_bambu.png)
 
-La finestra ha tre schede:
-1. **Pezzo e file**: modello (STL o STEP), cartella di output, prefisso, e cosa
-   scrivere (PNG, STL dei modifier, progetto `.3mf`).
-2. **Sezionamento**: area e aspect ratio massimi, i due angoli, la casella del
-   **terzo angolo solo dove serve** e, tra le avanzate, modalità, sagoma, area
-   minima, profondità e margini dei modifier.
-3. **Progetto Bambu Studio**: template, casella **Imposta l'infill sparso**
-   (densità e pattern, a scelta tra i pattern di Bambu), casella **Ruota il
-   pezzo sul piatto** (con i gradi) e un riquadro per altre impostazioni dei
-   modifier, una per riga (`top_shell_layers=7`).
+The window has three tabs:
+1. **Part and files**: model (STL or STEP), output folder, prefix, and what to write
+   (PNG, modifier STLs, `.3mf` project).
+2. **Sectioning**: maximum area and aspect ratio, the two angles, the **third angle,
+   only where needed** checkbox and, under *Advanced*, mode, footprint, minimum area,
+   depth and modifier margins.
+3. **Bambu Studio project**: template, the **Set the sparse infill** checkbox (density
+   and pattern, chosen among the Bambu patterns), the **Rotate the part on the plate**
+   checkbox (with the degrees) and a box for other modifier settings, one per line
+   (`top_shell_layers=7`).
 
-Le caselle non spuntate non scrivono nulla: i campi collegati si disattivano e
-l'opzione corrispondente non compare nel comando. Se togli la spunta a
-*Imposta l'infill sparso*, i modifier non toccano densità e pattern, che restano
-quelli del template.
+Unticked checkboxes write nothing: the related fields are greyed out and the
+corresponding option does not appear in the command. If you untick *Set the sparse
+infill*, the modifiers do not touch density and pattern, which stay those of the
+template.
 
-I pulsanti:
-- **Anteprima regioni** calcola il sezionamento e lo mostra nella finestra, senza
-  scrivere alcun file nella cartella di output;
-- **Genera** scrive i file e il log compare in basso a destra;
-- **Copia comando** copia negli appunti il comando equivalente, mostrato in
-  basso e aggiornato a ogni modifica: serve a ripetere una prova dal terminale e
-  a documentarla in tesi;
-- **Salva preset… / Carica preset…** salvano e ricaricano tutti i campi in un
-  file `.json` (per esempio uno per ogni condizione del DOE). All'avvio la
-  finestra riapre l'ultima configurazione usata (`~/.infill_sectioning_gui.json`).
+The buttons:
+- **Preview regions** computes the sectioning and shows it in the window, without
+  writing any file in the output folder;
+- **Generate** writes the files; the log appears at the bottom right;
+- **Copy command** copies the equivalent terminal command (shown at the bottom and
+  updated at every change): it lets you repeat a run and document it in the thesis;
+- **Save preset… / Load preset…** save and reload all the fields in a `.json` file
+  (for example one per DOE condition). At start-up the window reopens the last
+  configuration used (`~/.infill_sectioning_gui.json`).
 
-I campi vengono controllati prima di partire: un numero sbagliato, due angoli
-uguali, una densità fuori da 0–100, un file che non esiste o un'impostazione
-senza `=` danno un elenco di errori e non parte nulla.
+The fields are checked before running: a wrong number, two equal angles, a density
+outside 0–100, a file that does not exist or a setting without `=` give a list of
+errors and nothing runs.
 
-`tkinter` è incluso in Python su Windows e macOS. Su Linux:
-`sudo apt install python3-tk`. Quello che la finestra esegue è lo stesso
-`section_infill.py` di sempre, quindi il risultato è identico a quello del terminale.
+`tkinter` is included in Python on Windows and macOS. On Linux:
+`sudo apt install python3-tk`. The window runs the same `section_infill.py`, so the
+result is identical to the terminal's.
 
-## Uso da terminale
+### Using Visual Studio Code (Run button)
+
+The repository contains a `.vscode` folder, so the window can be opened from VS Code
+with the Run button:
+
+1. Install [Visual Studio Code](https://code.visualstudio.com/) and its **Python**
+   extension (VS Code offers it when you open the folder).
+2. **File → Open Folder…** and choose the program folder (the one containing
+   `section_infill_gui.py`).
+3. Choose the Python to use: `Ctrl+Shift+P` → **Python: Select Interpreter**. The one
+   you choose is shown at the bottom right.
+4. Install the libraries **for that interpreter**: `Terminal → Run Task… →
+   Install dependencies` (it runs `pip install -r requirements.txt` with the
+   selected interpreter).
+5. Open `section_infill_gui.py` and click the **▶ Run Python File** button at the top
+   right of the editor. The window opens.
+
+You can also press **F5** (or open *Run and Debug*) and choose **Open the GUI**: this
+works whichever file is open. The other launch configurations ask you for the paths:
+*Section a model*, *Check a G-code*, *Run the tests*. `Terminal → Run Task…` has
+*Open the GUI* and *Run the tests* too, and the **Testing** view lists the pytest
+tests.
+
+If a library is missing for the selected interpreter, the program does not stop with a
+traceback: it shows a message with the exact command to type for that Python (this is
+the most common problem when the interpreter selected in VS Code is not the one where
+`pip install` was run).
+
+Notes: the `.vscode` files are plain configuration. I could not run VS Code itself in
+the cloud session where they were written, only check the JSON and start the script from
+another working folder: if a menu name differs in your version, the same commands can be
+run from the integrated terminal. If very long OneDrive paths (with spaces and
+apostrophes) misbehave, copy the program to a short folder such as `C:\infill`.
+
+## Command line
 
 ```bash
-python section_infill.py provino.stl --max-area 900 --max-ar 2.0 --out-dir ./output
-python section_infill.py provino.step --out-dir ./output          # STEP (richiede cadquery-ocp)
+python section_infill.py specimen.stl --max-area 900 --max-ar 2.0 --out-dir ./output
+python section_infill.py specimen.step --out-dir ./output          # STEP (needs cadquery-ocp)
 ```
 
-| Opzione | Default | Significato |
+| Option | Default | Meaning |
 |---|---|---|
-| `--max-area` | 900 | area massima di una sotto-regione [mm²] |
-| `--max-ar` | 2.0 | aspect ratio massimo dell'ellisse equivalente |
-| `--mode` | `bisect` | `bisect` è il metodo di Shen et al.; `nsplit` è **sperimentale** (vedi sotto) |
-| `--angles A1 A2` | 45 135 | i due angoli di infill da alternare [°] |
-| `--extra-angle DEG` | (non usato) | terzo angolo, usato **solo** se due angoli non bastano (giunzioni a T) e sul minor numero possibile di regioni; per esempio `90` |
-| `--margin-xy` | 2.0 | di quanto i modifier sporgono oltre le pareti esterne del pezzo [mm] |
-| `--margin-z` | 1.0 | di quanto i modifier sporgono sopra il pezzo [mm] |
-| `--footprint` | `projection` | `projection` = ombra della mesh su XY; `section` = sezione a metà altezza |
-| `--min-area` | 1.0 | sotto quest'area [mm²] non si biseca più (blocco di sicurezza) |
-| `--max-depth` | 12 | profondità massima di ricorsione |
-| `--step-tolerance` | 0.05 | deflessione lineare della tassellazione STEP [mm] |
-| `--raster-pixel` | 0.1 | pixel [mm] per il controllo dei momenti con `cv2.moments` (0 = salta) |
-| `--prefix` | nome file | prefisso dei file di output |
-| `--export-3mf` | | scrive anche il progetto Bambu Studio `<prefix>.3mf` |
-| `--template-3mf` | | progetto `.3mf` salvato da Bambu Studio da cui copiare stampante, filamento e processo |
-| `--plate-rotation DEG` | 0 | ruota il pezzo e i modifier di DEG gradi sul piatto (antiorario visto dall'alto) e somma DEG agli angoli: gli angoli **rispetto al pezzo** restano 45°/135° (vedi "Pezzo ruotato sul piatto") |
-| `--inherit-infill` | | non scrive densità e pattern dell'infill sparso nei modifier: restano quelli del template |
-| `--infill-density PCT` | 100 | densità dell'infill sparso [%] di ogni modifier nel `.3mf` (0–100) |
-| `--infill-pattern` | `rectilinear` | pattern dell'infill sparso, col nome del menu di Bambu Studio (spazi → trattini): vedi la tabella dei pattern più sotto |
-| `--3mf-setting KEY=VALUE` | | override aggiuntivo per ogni modifier nel `.3mf`, ripetibile |
-| `--no-stl`, `--no-png` | | non scrive gli STL / il PNG |
+| `--max-area` | 900 | maximum area of a sub-region [mm²] |
+| `--max-ar` | 2.0 | maximum aspect ratio of the equivalent ellipse |
+| `--mode` | `bisect` | `bisect` is the method of Shen et al.; `nsplit` is **experimental** (see below) |
+| `--angles A1 A2` | 45 135 | the two infill angles to alternate [°] |
+| `--extra-angle DEG` | (not used) | third angle, used **only** if two angles are not enough (T-junctions) and on as few regions as possible; for example `90` |
+| `--margin-xy` | 2.0 | how far the modifiers extend beyond the outer walls of the part [mm] |
+| `--margin-z` | 1.0 | how far the modifiers extend above the part [mm] |
+| `--footprint` | `projection` | `projection` = shadow of the mesh on XY; `section` = cross-section at mid height |
+| `--min-area` | 1.0 | below this area [mm²] a region is not bisected any more (safety stop) |
+| `--max-depth` | 12 | maximum recursion depth |
+| `--step-tolerance` | 0.05 | linear deflection of the STEP tessellation [mm] |
+| `--raster-pixel` | 0.1 | pixel [mm] of the `cv2.moments` cross-check of the moments (0 = skip) |
+| `--prefix` | file name | prefix of the output files |
+| `--export-3mf` | | also writes the Bambu Studio project `<prefix>.3mf` |
+| `--template-3mf` | | `.3mf` project saved by Bambu Studio from which printer, filament and process are copied |
+| `--plate-rotation DEG` | 0 | rotates the part and the modifiers by DEG degrees on the plate (counter-clockwise seen from above) and adds DEG to the angles: the angles **relative to the part** stay 45°/135° (see "Part rotated on the plate") |
+| `--inherit-infill` | | does not write density and pattern of the sparse infill in the modifiers: those of the template stay |
+| `--infill-density PCT` | 100 | sparse infill density [%] of every modifier in the `.3mf` (0–100) |
+| `--infill-pattern` | `rectilinear` | sparse infill pattern, with the Bambu Studio menu name (spaces → hyphens): see the pattern table below |
+| `--3mf-setting KEY=VALUE` | | additional override for every modifier in the `.3mf`, repeatable |
+| `--no-stl`, `--no-png` | | do not write the STLs / the PNG |
+| `--png-dpi` | 200 | resolution of the PNG |
 
-Per generare dei pezzi di prova (provino 100×20×4, L, piastra forata, chiave):
+To generate test parts (100×20×4 specimen, L, plate with hole, wrench):
 
 ```bash
 python examples/make_test_parts.py
@@ -122,16 +157,16 @@ python section_infill.py examples/parts/provino_100x20x4.stl --out-dir output
 
 ### Output
 
-Con `--out-dir output` e input `provino.stl`:
+With `--out-dir output` and input `provino.stl`:
 
-| File | Contenuto |
+| File | Content |
 |---|---|
-| `provino_sections.json` | parametri, momenti del pezzo, verifica vettoriale/raster dei momenti; per ogni regione: poligono, bbox, area, AR, baricentro, angolo, profondità, percorso di bisezione, vicini, STL del modifier |
-| `provino_sections.png` | sagoma, regioni colorate e tratteggiate secondo l'angolo, tagli, ellissi equivalenti, contorni dei modifier |
-| `provino_modifier_00_45deg.stl`, … | un prisma per ogni regione, **nello stesso sistema di coordinate del pezzo**. Il numero è l'id della regione, il suffisso è l'angolo da assegnare |
-| `provino.3mf` | (solo con `--export-3mf`) progetto Bambu Studio con pezzo + modifier configurati |
+| `provino_sections.json` | parameters, moments of the part, vector/raster check of the moments; for each region: polygon, bbox, area, AR, centroid, angle (relative to the part and on the plate), depth, bisection path, neighbours, modifier STL |
+| `provino_sections.png` | footprint, regions coloured and hatched according to the angle, cuts, equivalent ellipses, modifier outlines |
+| `provino_modifier_00_45deg.stl`, … | one prism per region, **in the same coordinate system as the part**. The number is the region id, the suffix is the angle to assign |
+| `provino.3mf` | (only with `--export-3mf`) Bambu Studio project with part + configured modifiers |
 
-Sul provino 100×20 mm con le soglie di default:
+On the 100×20 mm specimen with the default thresholds:
 
 ```
 4 regions, all within thresholds: True
@@ -141,389 +176,378 @@ Sul provino 100×20 mm con le soglie di default:
   R3  angle=  135°  area=   500.00 mm²  AR= 1.25  bbox=[75.0, 0.0, 100.0, 20.0]
 ```
 
-La sequenza è 100×20 (A = 2000, AR = 5) → 2 × 50×20 (A = 1000 > 900, AR = 2,5 > 2)
-→ 4 × 25×20 (A = 500, AR = 1,25). Su una regione che resta connessa la bisezione
-produce sempre 2ⁿ parti per ramo, come nei casi studio del paper (cap: 4, wrench: 8).
+The sequence is 100×20 (A = 2000, AR = 5) → 2 × 50×20 (A = 1000 > 900, AR = 2.5 > 2)
+→ 4 × 25×20 (A = 500, AR = 1.25). On a region that stays connected, bisection always
+yields 2ⁿ parts per branch, as in the case studies of the paper (cap: 4, wrench: 8).
 
 ---
 
-## Come funziona (dettagli utili per la tesi)
+## How it works (details useful for the thesis)
 
-**Sagoma.**
-- **STL:** i triangoli non verticali della mesh vengono proiettati su XY e uniti
-  con shapely (`union_all`). Fori interni e parti multiple vengono gestiti.
-- **STEP:** il B-rep viene letto con OpenCascade (`cadquery-ocp`), tassellato
-  (`BRepMesh_IncrementalMesh`) e poi segue la stessa pipeline dell'STL.
-- Con `--footprint section` la sagoma è invece la sezione della mesh a metà
-  altezza. Su un pezzo 2.5D i due metodi coincidono (c'è un test che lo verifica).
+**Footprint.**
+- **STL:** the non-vertical triangles of the mesh are projected on XY and merged with
+  shapely (`union_all`). Inner holes and multiple parts are handled.
+- **STEP:** the B-rep is read with OpenCascade (`cadquery-ocp`), tessellated
+  (`BRepMesh_IncrementalMesh`) and then follows the same pipeline as the STL.
+- With `--footprint section` the footprint is instead the cross-section of the mesh at
+  mid height. On a 2.5D part the two methods coincide (a test checks it).
 
-**Momenti.**
-- Sono calcolati in modo esatto sul poligono (teorema di Green, fori inclusi).
-- Dalla matrice di covarianza `[[μ20, μ11], [μ11, μ02]] / A` si ricavano gli
-  autovalori λ1 ≥ λ2. Gli assi principali sono gli autovettori, i semiassi
-  dell'ellisse equivalente sono `a = 2√λ1` e `b = 2√λ2`, e `AR = √(λ1/λ2)`.
-  Per un rettangolo w×h questo dà esattamente AR = w/h.
-- Come controllo indipendente, la sagoma viene anche rasterizzata e analizzata
-  con `cv2.moments`. Il confronto finisce nel JSON (`part.moments_check`).
+**Moments.**
+- They are computed exactly on the polygon (Green's theorem, holes included).
+- From the covariance matrix `[[μ20, μ11], [μ11, μ02]] / A` the eigenvalues
+  λ1 ≥ λ2 are obtained. The principal axes are the eigenvectors, the semi-axes of the
+  equivalent ellipse are `a = 2√λ1` and `b = 2√λ2`, and `AR = √(λ1/λ2)`. For a w×h
+  rectangle this gives exactly AR = w/h.
+- As an independent check, the footprint is also rasterised and analysed with
+  `cv2.moments`. The comparison ends up in the JSON (`part.moments_check`).
 
-**Bisezione.** Una regione viene tagliata se `area > max_area` **oppure**
-`AR > max_ar`. Le disuguaglianze sono strette: una regione con AR = 2,0
-esatto va bene. Il taglio è la retta perpendicolare all'asse maggiore (cioè
-lungo l'asse minore) passante per il baricentro. Il procedimento si ripete su
-entrambe le metà.
-- Se un taglio divide una metà in pezzi non connessi (per esempio tagliando una
-  U), ogni pezzo diventa una regione a sé e prosegue indipendentemente.
-- `--min-area` e `--max-depth` servono da blocchi di sicurezza. Le regioni che si
-  fermano per questi limiti vengono marcate `within_thresholds: false` nel JSON e
-  con "(!)" nel PNG.
+**Bisection.** A region is cut if `area > max_area` **or** `AR > max_ar`. The
+inequalities are strict: a region with AR = 2.0 exactly is fine. The cut is the line
+perpendicular to the major axis (that is, along the minor axis) through the centroid.
+The procedure is repeated on both halves.
+- If a cut splits a half into disconnected pieces (for example cutting a U), every
+  piece becomes a region of its own and goes on independently.
+- `--min-area` and `--max-depth` are safety stops. Regions that stop because of these
+  limits are marked `within_thresholds: false` in the JSON and "(!)" in the PNG.
 
-**Angoli.**
-- Due regioni sono adiacenti se condividono un tratto di bordo (> 0,01 mm). Il
-  contatto in un solo punto non conta.
-- Gli angoli si assegnano colorando con 2 colori il grafo di adiacenza (ricerca
-  esaustiva fino a 16 regioni, euristica oltre).
-- Con giunzioni a T il grafo può contenere cicli dispari. In quel caso non esiste
-  un'alternanza perfetta: il programma sceglie l'assegnazione che minimizza la
-  lunghezza di bordo condivisa tra regioni con lo stesso angolo e la riporta in
-  `summary.adjacency_conflicts`. Succede con forme non rettangolari (T, L grandi,
-  C), non con un provino rettangolare, dove la bisezione dà fette in fila.
-- **Terzo angolo, solo dove serve** (`--extra-angle`, di norma `90`). Se due
-  angoli non bastano, il programma cerca la colorazione con 3 angoli che usa il
-  terzo sul **minor numero di regioni** (a parità, sull'area minore): ricerca
-  esatta con branch and bound, e sulle forme che provo (T, Z, L, C) basta il
-  terzo angolo su 2–5 regioni. Se due angoli bastano, il terzo non compare mai.
-  Costi da sapere: tra una regione col terzo angolo e le sue vicine la differenza
-  è 45° e non 90°, quindi lì l'alternanza è meno marcata; e `0°` o `90°` sono
-  parallelo e perpendicolare all'asse X **del pezzo**. Se nemmeno tre angoli
-  bastano (succede con forme molto frammentate, per esempio un triangolo diviso
-  in tante parti), restano dei conflitti, e vengono elencati nel report e
-  nell'output.
-  Nel JSON: `summary.extra_angle_regions` e, per ogni regione, `extra_angle`; nel
-  PNG le regioni col terzo angolo sono verdi, con tratteggio verticale, e in
-  legenda compare "extra, only where needed".
+**Angles.**
+- Two regions are neighbours if they share a stretch of boundary (> 0.01 mm). Touching
+  at a single point does not count.
+- Angles are assigned by 2-colouring the adjacency graph (exhaustive search up to 16
+  regions, heuristic beyond).
+- With T-junctions the graph can contain odd cycles. In that case a perfect alternation
+  does not exist: the program chooses the assignment that minimises the length of
+  boundary shared between regions with the same angle and reports it in
+  `summary.adjacency_conflicts`. This happens with non-rectangular shapes (T, large L,
+  C), not with a rectangular specimen, where bisection gives slices in a row.
+- **Third angle, only where needed** (`--extra-angle`, usually `90`). If two angles are
+  not enough, the program looks for the 3-angle colouring that uses the third angle on
+  the **fewest regions** (ties: smallest area): exact branch and bound; on the shapes I
+  tried (T, Z, L, C) the third angle on 2–5 regions is enough. If two angles are
+  enough, the third never appears. Costs to know: between a region with the third angle
+  and its neighbours the difference is 45° and not 90°, so the alternation is weaker
+  there; and `0°` or `90°` are parallel and perpendicular to the X axis **of the part**.
+  If even three angles are not enough (very fragmented shapes, for example a triangle
+  split in many parts), conflicts remain, and they are listed in the report and in the
+  output.
+  In the JSON: `summary.extra_angle_regions` and, for each region, `extra_angle`; in the
+  PNG the regions with the third angle are green, with vertical hatching, and the legend
+  says "extra, only where needed".
 
-**Modifier STL.**
-- Ogni modifier è il prisma della regione, allargato di `--margin-xy` **solo sui
-  lati esterni** del pezzo. Sui lati di taglio i modifier si toccano esattamente
-  lungo la linea di taglio, senza sovrapporsi. Insieme coprono tutto il pezzo
-  (anche questo è verificato dai test).
-- In Z vanno dalla base del pezzo a `top + margin-z`. **Non si estendono sotto la
-  base**: lì non si stampa nulla, e un modifier sotto il piano potrebbe falsare il
-  posizionamento dell'oggetto in Bambu Studio quando lo appoggia sul piatto.
+**Modifier STLs.**
+- Each modifier is the prism of the region, enlarged by `--margin-xy` **only on the
+  outer sides** of the part. On the cut sides the modifiers touch exactly along the cut
+  line, without overlapping. Together they cover the whole part (also checked by the
+  tests).
+- In Z they go from the base of the part to `top + margin-z`. **They do not extend below
+  the base**: nothing is printed there, and a modifier below the plate could distort the
+  placement of the object in Bambu Studio when it drops it on the plate.
 
-**Modalità `--mode nsplit` (SPERIMENTALE, non è il metodo di Shen et al.).**
-Divide la sagoma in N fasce di uguale larghezza lungo l'asse maggiore, con N
-minimo che rispetta le soglie. Sul provino 100×20 dà 3 fasce da 33,3 mm
-(AR 1,67). Serve solo come confronto nel piano DOE. Il JSON lo segnala nel campo
-`method`.
+**`--mode nsplit` (EXPERIMENTAL, not the method of Shen et al.).**
+It divides the footprint into N slabs of equal width along the major axis, with the
+smallest N that satisfies the thresholds. On the 100×20 specimen it gives 3 slabs of
+33.3 mm (AR 1.67). It only serves as a comparison in the DOE plan. The JSON flags it in
+the `method` field.
 
-## Test
+## Tests
 
 ```bash
 python -m pytest -q
 ```
 
-I test coprono:
-- momenti analitici del rettangolo e confronto vettoriale/raster su rettangolo,
-  L, piastra forata, chiave e rettangolo ruotato;
-- **il caso di riferimento 100×20 → 4 regioni da 25×20 mm (A = 500, AR = 1,25),
-  angoli 45/135/45/135**;
-- invarianza per rotazione, soglie come disuguaglianze strette, strisce lunghe
-  (8 regioni);
-- partizione esatta (nessuna area scoperta o sovrapposta) su forme generiche;
-- copertura dei modifier;
-- pipeline completa STL → JSON/PNG/STL;
-- lettura STEP, saltata se `cadquery-ocp` non è installato;
-- export `.3mf`: confronto con un progetto salvato a mano da Bambu Studio 2.08
-  (`tests/data/bambu_reference_provino.3mf`). Devono coincidere trasformazioni,
-  posizione sul piatto, geometria vertice per vertice e impostazioni di
-  stampante/filamento. I modifier devono avere tipo `modifier_part` e
-  l'`infill_direction` corretto. C'è anche una lettura di controllo con
-  `lib3mf` (la libreria di riferimento del consorzio 3MF), se installata
-  (`pip install lib3mf`).
+The tests cover:
+- analytic moments of the rectangle and vector/raster comparison on a rectangle, L,
+  plate with hole, wrench and rotated rectangle;
+- **the reference case 100×20 → 4 regions of 25×20 mm (A = 500, AR = 1.25), angles
+  45/135/45/135**;
+- rotation invariance, strict inequalities of the thresholds, long strips (8 regions);
+- exact partition (no uncovered or overlapping area) on generic shapes;
+- modifier coverage;
+- the third angle: only where needed, on the fewest regions (checked by brute force);
+- full pipeline STL → JSON/PNG/STL;
+- STEP reading, skipped if `cadquery-ocp` is not installed;
+- `.3mf` export: comparison with a project saved by hand from Bambu Studio 2.08
+  (`tests/data/bambu_reference_provino.3mf`). Transforms, position on the plate,
+  vertex-by-vertex geometry and printer/filament settings must coincide. The modifiers
+  must have type `modifier_part` and the right `infill_direction`. There is also a
+  check read with `lib3mf` (the reference library of the 3MF consortium), if installed
+  (`pip install lib3mf`);
+- plate rotation: transform, compensated angles, G-code checked on a rotated part;
+- the form of the interface, its validation, the command it produces and the
+  start-up check of the libraries; a smoke test of the window itself (needs tkinter and
+  a display, otherwise skipped; on Linux: `xvfb-run python -m pytest tests`).
 
 ---
 
-## Import in Bambu Studio, passo per passo
+## Importing into Bambu Studio, step by step
 
-> **Nota.** I nomi dei menu qui sotto si riferiscono a Bambu Studio 2.08 e
-> possono cambiare leggermente tra versioni. La verifica decisiva è sempre
-> l'anteprima dopo lo slicing.
+> **Note.** The menu names below refer to Bambu Studio 2.08 and may change slightly
+> between versions. The deciding check is always the preview after slicing.
 
-### Metodo 0 (consigliato): progetto `.3mf` generato automaticamente
+### Method 0 (recommended): automatically generated `.3mf` project
 
-1. Prepara una volta sola un **progetto modello** con la stampante, il filamento e
-   il processo della campagna sperimentale (es. H2D + PA6). In Bambu Studio
-   imposta i preset e salva con **File → Save Project As…**. Il file deve essere
-   `.3mf`, **non** `.gcode.3mf`.
-2. Genera il progetto:
+1. Prepare once a **template project** with the printer, filament and process of the
+   experimental campaign (e.g. H2D + PA6). In Bambu Studio set the presets and save with
+   **File → Save Project As…**. The file must be `.3mf`, **not** `.gcode.3mf`.
+2. Generate the project:
    ```bash
-   python section_infill.py provino.stl --out-dir output --export-3mf \
-       --template-3mf modello_H2D_PA6.3mf --infill-density 100
+   python section_infill.py specimen.stl --out-dir output --export-3mf \
+       --template-3mf template_H2D_PA6.3mf --infill-density 100
    ```
-   Ogni modifier riceve `infill_direction` (45 o 135), la densità e il pattern
-   dell'infill sparso (`--infill-density`, `--infill-pattern`) e gli eventuali
-   override passati con `--3mf-setting`, che prevalgono sul resto. Le chiavi sono
-   quelle di configurazione di Bambu Studio, per esempio `infill_direction` o
-   `top_shell_layers`. Senza `--template-3mf` il progetto non contiene
-   impostazioni di stampa e Bambu Studio usa i preset selezionati in quel momento.
-3. Apri `output/provino.3mf` in Bambu Studio (File → Open Project).
-4. Controlla nella lista oggetti che le parti `…_modifier_XX_…` abbiano l'icona
-   dei **modifier**, e che ognuna mostri l'override della direzione. Poi fai lo
-   slice e controlla l'anteprima.
+   Each modifier gets `infill_direction` (45 or 135), the sparse infill density and
+   pattern (`--infill-density`, `--infill-pattern`) and any override given with
+   `--3mf-setting`, which win over the rest. The keys are Bambu Studio configuration
+   keys, for example `infill_direction` or `top_shell_layers`. Without
+   `--template-3mf` the project contains no print settings and Bambu Studio uses the
+   presets selected at that moment.
+3. Open `output/specimen.3mf` in Bambu Studio (File → Open Project).
+4. Check in the object list that the `…_modifier_XX_…` parts have the **modifier** icon
+   and that each shows the direction override. Then slice and check the preview.
 
-Il programma avvisa se il pattern di infill sparso in uso non stampa una sola
-direzione per layer, per esempio Grid.
+The program warns if the sparse infill pattern in use does not print a single direction
+per layer, for example Grid.
 
-#### Infill pieno (100%) oppure ridotto (x%)
+#### Solid infill (100%) or reduced (x%)
 
-Per passare dal provino pieno a uno con infill sparso al 20%, cambia solo
+To go from the solid specimen to one with 20% sparse infill, change only
 `--infill-density`:
 
 ```bash
-python section_infill.py provino.stl --out-dir output_20 --export-3mf \
-    --template-3mf modello_H2D_PA6.3mf --infill-density 20
+python section_infill.py specimen.stl --out-dir output_20 --export-3mf \
+    --template-3mf template_H2D_PA6.3mf --infill-density 20
 ```
 
-Cosa cambia e cosa no, verificato sui sorgenti di Bambu Studio (`Fill.cpp`) e
-sul G-code di un provino reale al 20% (H2D, Bambu Studio 2.08):
-- **Cambia** la densità dell'infill sparso, cioè dei layer intermedi. A 100%
-  Bambu non usa più il pattern sparso: tutti i layer sono solidi e seguono il
-  pattern "internal solid infill" del template.
-- **Non cambia** la direzione. Infill sparso, solido interno, top e bottom usano
-  tutti la stessa `infill_direction` del modifier. Nel G-code del provino al 20%
-  tutti i layer (bottom, solidi interni, sparsi, top) alternano 45°/135° tra
-  regioni adiacenti, e in ogni regione la direzione si inverte a ogni layer.
-- **Un'eccezione, solo con infill sparso:** il **bridge interno**, cioè il primo
-  layer che copre l'infill sparso (layer 15 su 20 nel provino da 4 mm), non
-  segue l'alternanza. Bambu ne sceglie la direzione da solo, a partire dalle
-  linee dell'infill sotto, e `infill_direction` non ci arriva (il parametro
-  `bridge_angle` vale solo per i bridge esterni). Nel G-code di prova il bridge
-  è a 135° in tutte e 4 le regioni. Conta come uno dei 5 layer di top shell
-  e si verifica solo con densità inferiore al 100%.
-- **Non cambia** il numero di layer solidi: `bottom_shell_layers` e
-  `top_shell_layers` vengono dal template. Se vuoi più o meno layer solidi,
-  cambiali nel template, oppure per i soli modifier con
-  `--3mf-setting top_shell_layers=7`.
+What changes and what does not, verified on the Bambu Studio sources (`Fill.cpp`) and on
+the G-code of a real 20% specimen (H2D, Bambu Studio 2.08):
+- **Changes**: the sparse infill density, that is of the intermediate layers. At 100%
+  Bambu no longer uses the sparse pattern: all layers are solid and follow the
+  "internal solid infill" pattern of the template.
+- **Does not change**: the direction. Sparse infill, internal solid, top and bottom all
+  use the same `infill_direction` of the modifier. In the G-code of the 20% specimen
+  all layers (bottom, internal solid, sparse, top) alternate 45°/135° between adjacent
+  regions, and in each region the direction reverses at every layer.
+- **One exception, only with sparse infill:** the **internal bridge**, that is the first
+  layer covering the sparse infill (layer 15 of 20 in the 4 mm specimen), does not
+  follow the alternation. Bambu chooses its direction by itself, from the infill lines
+  below, and `infill_direction` does not reach it (the `bridge_angle` parameter only
+  applies to external bridges). In the test G-code the bridge is at 135° in all 4
+  regions. It counts as one of the 5 top shell layers and only occurs with a density
+  below 100%.
+- **Does not change**: the number of solid layers: `bottom_shell_layers` and
+  `top_shell_layers` come from the template. For more or fewer solid layers change them
+  in the template, or only for the modifiers with `--3mf-setting top_shell_layers=7`.
 
-Come sempre, conserva densità e pattern nel piano DOE: la densità è un fattore a
-sé, e il confronto fra provino sezionato e non sezionato va fatto alla stessa
-densità.
+As always, keep density and pattern in the DOE plan: density is a factor of its own, and
+the comparison between sectioned and non-sectioned specimens must be made at the same
+density.
 
-#### Tornare all'infill pieno (100%)
+#### Back to solid infill (100%)
 
-100% è il valore predefinito, quindi basta non passare l'opzione, oppure
-passarla esplicitamente:
+100% is the default, so just do not pass the option, or pass it explicitly:
 
 ```bash
-python section_infill.py provino.stl --out-dir output_100 --export-3mf \
-    --template-3mf modello_H2D_PA6.3mf --infill-density 100
+python section_infill.py specimen.stl --out-dir output_100 --export-3mf \
+    --template-3mf template_H2D_PA6.3mf --infill-density 100
 ```
 
-#### Cambiare il tipo di infill
+#### Changing the infill type
 
-`--infill-pattern` accetta i nomi del menu di Bambu Studio. Se hai più
-parole, usa i trattini: `--infill-pattern adaptive-cubic`. Un nome sbagliato dà
-un errore con l'elenco dei nomi validi.
+`--infill-pattern` accepts the Bambu Studio menu names. If there are several words use
+hyphens: `--infill-pattern adaptive-cubic`. A wrong name gives an error with the list of
+valid names.
 
-| Nome da usare | Menu di Bambu Studio | Direzioni per layer | Effetto dell'alternanza 45°/135° sull'infill sparso |
+| Name to use | Bambu Studio menu | Directions per layer | Effect of the 45°/135° alternation on the sparse infill |
 |---|---|---|---|
-| `rectilinear` (default) | Rectilinear | una | **verificato** sul G-code: funziona |
-| `line` | Line | una | atteso come Rectilinear, non verificato |
-| `aligned-rectilinear` | Aligned Rectilinear | una, uguale su tutti i layer | atteso, non verificato; la direzione non si inverte tra layer |
-| `grid` | Grid | due (±45° insieme) | **nessun effetto**, verificato sul G-code |
-| `cubic`, `triangles`, `tri-hexagon`, `honeycomb`, `gyroid`, `adaptive-cubic`, `3d-honeycomb`, `support-cubic`, `cross-hatch`, `lightning`, `concentric`, `hilbert-curve`, `archimedean-chords`, `octagram-spiral`, `cross-zag`, `locked-zag`, `2d-lattice` | omonimi | più direzioni, o nessuna direzione preferita | **non garantito e non verificato**. Il programma stampa un avviso |
-| `zigzag` | Zig Zag | pattern "locked" | come sopra, non verificato |
+| `rectilinear` (default) | Rectilinear | one | **verified** on the G-code: works |
+| `line` | Line | one | expected like Rectilinear, not verified |
+| `aligned-rectilinear` | Aligned Rectilinear | one, the same on all layers | expected, not verified; the direction does not reverse between layers |
+| `grid` | Grid | two (±45° together) | **no effect**, verified on the G-code |
+| `cubic`, `triangles`, `tri-hexagon`, `honeycomb`, `gyroid`, `adaptive-cubic`, `3d-honeycomb`, `support-cubic`, `cross-hatch`, `lightning`, `concentric`, `hilbert-curve`, `archimedean-chords`, `octagram-spiral`, `cross-zag`, `locked-zag`, `2d-lattice` | same names | several directions, or no preferred direction | **not guaranteed and not verified**. The program prints a warning |
+| `zigzag` | Zig Zag | "locked" pattern | as above, not verified |
 
-Nota: la voce **Rectilinear** del menu è salvata da Bambu col nome `zig-zag`
-(mentre `Zig Zag` del menu è `zigzag`, un pattern diverso). Il programma gestisce
-la differenza: scrivi `rectilinear`.
+Note: the **Rectilinear** entry of the menu is stored by Bambu under the name `zig-zag`
+(while the menu's `Zig Zag` is `zigzag`, a different pattern). The program handles the
+difference: write `rectilinear`.
 
-Per usare un pattern non verificato, controlla il risultato con il G-code, come
-descritto qui sotto.
+To use an unverified pattern, check the result with the G-code, as described below.
 
-#### Pezzo ruotato sul piatto (`--plate-rotation`)
+#### Part rotated on the plate (`--plate-rotation`)
 
-In Bambu Studio `infill_direction` è un angolo del **piatto**, non del pezzo.
-L'ho verificato sui sorgenti: l'oggetto viene tagliato in layer già ruotato
-(`PrintObject::trafo` contiene la rotazione dell'istanza) e `Fill::_infill_direction`
-non compensa la rotazione. Quindi, se un provino lungo 100 mm viene messo sulla
-diagonale del piatto a 45°, le regioni con `infill_direction = 45` stampano linee
-**parallele all'asse del provino**, e quelle a 135° perpendicolari: non è più
-la configurazione 45°/135° rispetto al pezzo.
+In Bambu Studio `infill_direction` is an angle of the **plate**, not of the part. I
+verified it on the sources: the object is sliced into layers already rotated
+(`PrintObject::trafo` contains the rotation of the instance) and
+`Fill::_infill_direction` does not compensate the rotation. So, if a 100 mm specimen is
+placed on the diagonal of the plate at 45°, the regions with `infill_direction = 45`
+print lines **parallel to the axis of the specimen**, and those at 135° perpendicular:
+it is no longer the 45°/135° configuration relative to the part.
 
-Per mantenere gli angoli rispetto al pezzo, passa la rotazione che il pezzo ha
-sul piatto:
+To keep the angles relative to the part, pass the rotation the part has on the plate:
 
 ```bash
-python section_infill.py provino.stl --out-dir output_rot --export-3mf \
-    --template-3mf modello_H2D_PA6.3mf --plate-rotation 42.4
+python section_infill.py specimen.stl --out-dir output_rot --export-3mf \
+    --template-3mf template_H2D_PA6.3mf --plate-rotation 42.4
 ```
 
-Nel `.3mf` il pezzo e i modifier sono ruotati di 42,4° attorno all'asse verticale
-(antiorario visto dall'alto, centro del piatto) e ogni modifier riceve
-`infill_direction = angolo relativo + rotazione`, per esempio 45° → 87,4° e
-135° → 177,4° (modulo 180°). Il programma stampa la tabella delle conversioni, e
-nel JSON ogni regione ha `infill_angle_deg` (relativo al pezzo) e
-`plate_angle_deg` (sul piatto). Se il pezzo ruotato esce dall'area di stampa del
-template, c'è un avviso.
+In the `.3mf` the part and the modifiers are rotated by 42.4° about the vertical axis
+(counter-clockwise seen from above, plate centre) and each modifier gets
+`infill_direction = relative angle + rotation`, for example 45° → 87.4° and
+135° → 177.4° (modulo 180°). The program prints the conversion table, and in the JSON
+each region has `infill_angle_deg` (relative to the part) and `plate_angle_deg` (on the
+plate). If the rotated part leaves the printable area of the template, there is a
+warning.
 
-Per scegliere la rotazione: 0° = lato lungo lungo X; 90° = lungo Y; per la
-diagonale dell'H2D (350 × 320 mm) l'angolo è `atan(320/350) ≈ 42,4°`.
+To choose the rotation: 0° = long side along X; 90° = along Y; for the diagonal of the
+H2D (350 × 320 mm) the angle is `atan(320/350) ≈ 42.4°`.
 
-> ⚠️ **Non ruotare a mano il pezzo in Bambu Studio dopo aver aperto il `.3mf`:**
-> i modifier ruoterebbero con il pezzo, ma gli `infill_direction` restano quelli
-> scritti, e la compensazione si perde. Se ti serve un'altra rotazione, rigenera
-> il progetto con `--plate-rotation`. Se usi i metodi A/B (import manuale degli
-> STL) e ruoti il pezzo di θ, imposta su ogni modifier il valore `plate_angle_deg`
-> del JSON (angolo relativo + θ) e non il valore nel nome del file.
+> ⚠️ **Do not rotate the part by hand in Bambu Studio after opening the `.3mf`:** the
+> modifiers would rotate with the part, but the `infill_direction` values stay those
+> written, and the compensation is lost. If you need another rotation, regenerate the
+> project with `--plate-rotation`. If you use methods A/B (manual STL import) and rotate
+> the part by θ, set on each modifier the `plate_angle_deg` value of the JSON
+> (relative angle + θ) and not the value in the file name.
 >
-> Nel campo "Rotation Z" di Bambu Studio dovresti rivedere il valore passato a
-> `--plate-rotation`, ma non ho potuto verificarlo sull'interfaccia: controlla
-> che il verso sia antiorario, come nella miniatura del piatto.
+> In the "Rotation Z" field of Bambu Studio you should see again the value passed to
+> `--plate-rotation`, but I could not verify it in the interface: check that the
+> direction is counter-clockwise, as in the plate thumbnail.
 
-#### Verificare il risultato sul G-code
+#### Checking the result on the G-code
 
-Dopo lo slice, esporta il piatto con **File → Export → Export plate sliced
-file** (`.gcode.3mf`) e lancia:
+After slicing, export the plate with **File → Export → Export plate sliced file**
+(`.gcode.3mf`) and run:
 
 ```bash
-python analyze_gcode.py provino.gcode.3mf output/provino_sections.json
+python analyze_gcode.py specimen.gcode.3mf output/specimen_sections.json
 ```
 
-Per ogni layer e ogni regione stampa la direzione dominante delle linee di
-infill (sul piatto) e la lunghezza estrusa, poi fa due controlli su tutti i layer:
-1. le regioni adiacenti hanno la differenza di angolo configurata (90° per
-   45°/135°, 45° dove è stato usato il terzo angolo);
-2. la direzione **rispetto al pezzo** è quella configurata (45° o 135°, più 90°
-   sui layer alterni), qualunque sia la rotazione del pezzo sul piatto. La
-   rotazione e la posizione sono lette dal JSON (`bambu_3mf.placement`).
+For each layer and region it prints the dominant direction of the infill lines (on the
+plate) and the extruded length, then makes two checks on all layers:
+1. adjacent regions have the configured angle difference (90° for 45°/135°, 45° where
+   the third angle was used);
+2. the direction **relative to the part** is the configured one (45° or 135°, plus 90°
+   on alternate layers), whatever the rotation of the part on the plate. Rotation and
+   position are read from the JSON (`bambu_3mf.placement`).
 
-Esce con codice 0 se tutto è corretto, 1 altrimenti. I layer di bridge non
-vengono controllati, perché la loro direzione è automatica. Con Grid, o con un
-pattern a più direzioni, compare ad esempio `45+135` nelle celle dei layer sparsi
-e il controllo fallisce. Con un pezzo ruotato **senza** compensare gli angoli le
-regioni restano ortogonali tra loro, ma il secondo controllo fallisce.
+It exits with code 0 if everything is correct, 1 otherwise. Bridge layers are not
+checked, because their direction is automatic. With Grid, or with a multi-direction
+pattern, `45+135` appears in the cells of the sparse layers and the check fails. With a
+part rotated **without** compensating the angles the regions stay orthogonal to each
+other, but the second check fails.
 
-Se il JSON non contiene la posizione (generato con una versione precedente) o il
-pezzo è stato ruotato a mano in Bambu Studio, usa `--rotation DEG` e, per un
-pezzo non simmetrico, `--offset DX DY`.
+If the JSON does not contain the position (generated by an earlier version) or the part
+was rotated by hand in Bambu Studio, use `--rotation DEG` and, for a non-symmetric
+part, `--offset DX DY`.
 
-### Metodo A: caricare pezzo e modifier insieme come oggetto multi-parte
+### Method A: load part and modifiers together as a multi-part object
 
-Questo metodo conserva **esattamente** le posizioni relative, perché tutti gli STL
-sono nello stesso sistema di coordinate.
+This method keeps the relative positions **exactly**, because all STLs are in the same
+coordinate system.
 
-1. **File → Import → Import 3MF/STL/STEP…** (Ctrl+I). Seleziona **insieme** il
-   file del pezzo (es. `provino.stl`) e tutti i `provino_modifier_XX_*deg.stl`.
-2. Alla domanda *"Multi-part object detected… Load these files as a single object
-   with multiple parts?"* rispondi **Sì**. Ottieni un solo oggetto con N+1 parti
-   nella lista oggetti.
-3. **Passaggio obbligatorio:** nella lista oggetti, per ogni parte
-   `…_modifier_XX_…` fai tasto destro → **Change type** → **Modifier**. Il pezzo
-   vero resta "Part".
-   > ⚠️ Se salti questo passaggio, i "modifier" restano **parti solide** e vengono
-   > stampati: il pezzo diventa 104×24×5 mm invece di 100×20×4, perché i modifier
-   > sporgono di 2 mm per lato e 1 mm sopra. È successo nel primo progetto di
-   > prova: nel `.3mf` le parti risultavano `subtype="normal_part"` e il piatto
-   > slicato misurava 104×24 mm.
-4. Per ogni modifier, imposta la direzione dell'infill:
-   - seleziona il modifier nella lista oggetti, poi tasto destro → **Add settings**
-     (o l'icona per aggiungere parametri) → categoria **Strength**, oppure cerca
-     "direction";
-   - imposta la direzione dell'infill (chiave di configurazione
-     `infill_direction`) al valore indicato nel nome del file (45 o 135).
-     Impostala **esplicitamente anche a 45°**: se in futuro cambi la direzione
-     globale del processo, i modifier lasciati al default la seguirebbero;
-   - in Bambu Studio 2.08 non esiste una direzione separata per l'infill solido:
-     nel G-code di prova anche gli strati pieni (bottom, internal solid, top)
-     seguivano `infill_direction` di ogni modifier.
-5. **Slice** e controlla l'anteprima layer per layer: nelle regioni adiacenti le
-   linee d'infill devono risultare ortogonali tra loro.
+1. **File → Import → Import 3MF/STL/STEP…** (Ctrl+I). Select **together** the part file
+   (e.g. `specimen.stl`) and all the `specimen_modifier_XX_*deg.stl`.
+2. To the question *"Multi-part object detected… Load these files as a single object
+   with multiple parts?"* answer **Yes**. You get a single object with N+1 parts in the
+   object list.
+3. **Mandatory step:** in the object list, for each `…_modifier_XX_…` part right-click →
+   **Change type** → **Modifier**. The real part stays "Part".
+   > ⚠️ If you skip this step the "modifiers" stay **solid parts** and are printed: the
+   > specimen becomes 104×24×5 mm instead of 100×20×4, because the modifiers extend 2 mm
+   > per side and 1 mm above. It happened in the first test project: in the `.3mf` the
+   > parts were `subtype="normal_part"` and the sliced plate measured 104×24 mm.
+4. For each modifier, set the infill direction:
+   - select the modifier in the object list, then right-click → **Add settings** (or the
+     icon to add parameters) → category **Strength**, or search "direction";
+   - set the infill direction (configuration key `infill_direction`) to the value given
+     in the file name (45 or 135). Set it **explicitly also at 45°**: if you later change
+     the global direction of the process, the modifiers left at the default would follow
+     it;
+   - in Bambu Studio 2.08 there is no separate direction for solid infill: in the test
+     G-code also the solid layers (bottom, internal solid, top) followed the
+     `infill_direction` of each modifier.
+5. **Slice** and check the preview layer by layer: in adjacent regions the infill lines
+   must be orthogonal to each other.
 
-### Metodo B: aggiungere i modifier a un oggetto già caricato
+### Method B: add the modifiers to an already loaded object
 
-1. Importa solo il pezzo.
-2. Tasto destro sull'oggetto → **Add modifier** → **Load…** e scegli uno o più
+1. Import only the part.
+2. Right-click the object → **Add modifier** → **Load…** and choose one or more
    `…_modifier_XX_…stl`.
-3. Controlla la posizione del modifier. A seconda della versione, Bambu Studio
-   potrebbe riposizionare il modifier caricato invece di mantenere le coordinate
-   originali. Nel JSON, `modifier_center_offset_from_part_center_mm` riporta per
-   ogni modifier lo spostamento (X, Y, Z) del centro della sua bounding box
-   rispetto al centro di quella del pezzo. Usalo per correggere la posizione nel
-   pannello di manipolazione, oppure passa al metodo A.
-4. Controlla che il tipo sia "Modifier" e imposta la direzione dell'infill come
-   ai punti 3–4 del metodo A.
+3. Check the position of the modifier. Depending on the version, Bambu Studio might
+   reposition the loaded modifier instead of keeping the original coordinates. In the
+   JSON, `modifier_center_offset_from_part_center_mm` gives for each modifier the shift
+   (X, Y, Z) of the centre of its bounding box from the centre of the part's. Use it to
+   correct the position in the manipulation panel, or switch to method A.
+4. Check that the type is "Modifier" and set the infill direction as in points 3–4 of
+   method A.
 
-### Avvertenze
+### Warnings
 
-- **La direzione dell'infill in Bambu Studio è riferita al piatto, non al pezzo.**
-  Se ruoti l'oggetto sul piatto, gli angoli rispetto al pezzo cambiano (a 90°,
-  45° e 135° si scambiano). Per posizionare il pezzo a un angolo qualsiasi,
-  genera il progetto con `--plate-rotation` (vedi "Pezzo ruotato sul piatto"),
-  invece di ruotarlo a mano.
-- **Non usare il pattern Grid per l'infill sparso.** Grid stampa sia +45° sia
-  −45° su ogni layer, quindi ruotarlo di 90° dà lo stesso identico disegno e
-  l'alternanza 45°/135° tra regioni non ha alcun effetto. L'ho verificato sul
-  G-code di un test reale (Bambu Studio 2.08, Grid 15%): negli strati sparsi
-  tutte e 4 le regioni avevano linee a 45° e 135° in parti uguali. Negli strati
-  pieni (bottom, internal solid, top) invece le regioni alternavano correttamente
-  45/135/45/135, con rotazione di 90° a ogni layer. Per l'infill sparso usa un
-  pattern a linee singole, per esempio Zig-zag o Rectilinear, da fissare nel DOE.
-  Controlla sempre nell'anteprima.
-- Con i pattern a linee singole che ruotano di 90° a ogni layer (come i solidi
-  qui sopra), due regioni a 45° e 135° restano in opposizione di fase su *ogni*
-  layer, che è l'alternanza cercata. *Aligned rectilinear* invece non ruota tra
-  i layer: le regioni restano comunque a 45° e 135°, ma l'orientazione di ogni
-  regione è la stessa su tutti i layer. È un'altra condizione sperimentale.
-- I modifier cambiano solo i parametri che imposti. Pareti, top e bottom seguono
-  le impostazioni dell'oggetto, a meno di aggiungere altri override.
+- **The infill direction in Bambu Studio refers to the plate, not to the part.** If you
+  rotate the object on the plate, the angles relative to the part change (at 90°, 45°
+  and 135° swap). To place the part at any angle, generate the project with
+  `--plate-rotation` (see "Part rotated on the plate") instead of rotating it by hand.
+- **Do not use the Grid pattern for the sparse infill.** Grid prints both +45° and −45°
+  on every layer, so rotating it by 90° gives exactly the same drawing and the 45°/135°
+  alternation between regions has no effect. I verified it on the G-code of a real test
+  (Bambu Studio 2.08, Grid 15%): in the sparse layers all 4 regions had lines at 45° and
+  135° in equal parts. In the solid layers (bottom, internal solid, top) instead the
+  regions alternated correctly 45/135/45/135, with a 90° rotation at every layer. For
+  the sparse infill use a single-line pattern, for example Rectilinear, to be fixed in
+  the DOE. Always check the preview.
+- With single-line patterns that rotate by 90° at every layer (like the solid ones
+  above), two regions at 45° and 135° stay in opposite phase on *every* layer, which is
+  the alternation we want. *Aligned rectilinear* instead does not rotate between layers:
+  the regions are still at 45° and 135°, but the orientation of each region is the same
+  on all layers. It is another experimental condition.
+- The modifiers change only the parameters you set. Walls, top and bottom follow the
+  settings of the object, unless you add other overrides.
 
 ---
 
-## Come è costruito il `.3mf`
+## How the `.3mf` is built
 
-Il formato è stato ricavato da un progetto salvato da Bambu Studio 2.08
-(`tests/data/bambu_reference_provino.3mf`, da cui è stato rimosso l'id
-dell'account Bambu). Ogni dettaglio è stato verificato sui sorgenti di Bambu
-Studio: `ModelVolume::type_from_string` in `src/libslic3r/Model.cpp` e
-l'importer `_BBS_3MF_Importer` in `src/libslic3r/Format/bbs_3mf.cpp`.
-- un oggetto con componenti in `3D/3dmodel.model`, e una mesh per parte in
-  `3D/Objects/object_1.model`, centrata sulla propria bounding box;
-- in `Metadata/model_settings.config`, ogni parte ha `subtype="normal_part"`
-  (pezzo) oppure `subtype="modifier_part"` (modifier). Ogni altro
-  `<metadata key=… value=…>` della parte viene caricato come override di quella
-  parte, per esempio `infill_direction`;
-- Bambu Studio tratta il file come progetto proprio solo se il metadato
-  `Application` inizia con `BambuStudio-`. Il valore viene copiato dal template;
-- `Metadata/project_settings.config`, cioè stampante, filamento e processo, viene
-  copiato così com'è dal template.
-- dal template vengono copiati anche i metadati del piatto, in particolare
-  `filament_map_mode` e `filament_maps`, cioè la mappatura filamento→ugello
-  necessaria per stampanti a due ugelli come l'H2D, e i file ausiliari
-  (`filament_sequence.json`, intestazione di `slice_info.config`). Vengono
-  generate le miniature del piatto (`plate_1.png`, `plate_1_small.png`). A parte
-  le miniature e gli identificativi, il file ha la stessa struttura di un
-  progetto salvato da Bambu Studio.
+The format was derived from a project saved by Bambu Studio 2.08
+(`tests/data/bambu_reference_provino.3mf`, from which the Bambu account id was removed).
+Every detail was verified on the Bambu Studio sources: `ModelVolume::type_from_string`
+in `src/libslic3r/Model.cpp` and the `_BBS_3MF_Importer` importer in
+`src/libslic3r/Format/bbs_3mf.cpp`.
+- one object with components in `3D/3dmodel.model`, and one mesh per part in
+  `3D/Objects/object_1.model`, centred on its own bounding box;
+- in `Metadata/model_settings.config`, each part has `subtype="normal_part"` (part) or
+  `subtype="modifier_part"` (modifier). Every other `<metadata key=… value=…>` of the
+  part is loaded as an override of that part, for example `infill_direction`;
+- Bambu Studio treats the file as its own project only if the `Application` metadata
+  starts with `BambuStudio-`. The value is copied from the template;
+- `Metadata/project_settings.config`, that is printer, filament and process, is copied
+  as it is from the template;
+- the plate metadata are also copied from the template, in particular
+  `filament_map_mode` and `filament_maps`, the filament→nozzle mapping needed by
+  two-nozzle printers such as the H2D, and the auxiliary files
+  (`filament_sequence.json`, header of `slice_info.config`). The plate thumbnails
+  (`plate_1.png`, `plate_1_small.png`) are generated. Apart from the thumbnails and the
+  identifiers, the file has the same structure as a project saved by Bambu Studio;
+- the object rotation is the 3MF transform of the build item; Bambu Studio reads the
+  12 numbers into the columns of its matrix (`bbs_get_transform_from_3mf_specs_string`),
+  so the first triple is the image of the X axis: `(cos, sin, 0)` for a counter-clockwise
+  rotation.
 
-## Struttura
+## Structure
 
 ```
-section_infill.py              CLI
+section_infill.py              command line
+section_infill_gui.py          graphical interface (tkinter)
+analyze_gcode.py               check of the infill directions in the G-code
 infill_sectioning/
-  footprint.py                 lettura STL/STEP ed estrazione della sagoma XY
-  moments.py                   momenti esatti (Green) e raster (cv2.moments)
-  sectioning.py                bisezione ricorsiva, nsplit, adiacenza, angoli, modifier
+  footprint.py                 STL/STEP reading and extraction of the XY footprint
+  moments.py                   exact (Green) and raster (cv2.moments) moments
+  sectioning.py                recursive bisection, nsplit, adjacency, angles, modifiers
   export.py                    JSON, PNG, STL
-  bambu3mf.py                  progetto Bambu Studio (.3mf)
-analyze_gcode.py               controllo delle direzioni di infill nel G-code
-section_infill_gui.py          interfaccia grafica (tkinter)
-infill_sectioning/gui_model.py campi dell'interfaccia, validazione e comando generato
-tests/test_sectioning.py       test (pytest)
-tests/test_bambu3mf.py         test dell'export .3mf
-tests/test_analyze_gcode.py    test del controllo sul G-code
-tests/test_gui_model.py        test dei campi, della validazione e del comando della GUI
-tests/test_gui_smoke.py        prova della finestra (richiede tkinter e un display; altrimenti saltata)
-tests/data/                    progetto di riferimento salvato da Bambu Studio
-examples/make_test_parts.py    pezzi di prova procedurali
+  bambu3mf.py                  Bambu Studio project (.3mf)
+  gui_model.py                 fields of the interface, validation and generated command
+  deps.py                      start-up check of the libraries
+tests/                         pytest tests (see "Tests"); tests/data = reference project
+examples/make_test_parts.py    procedural test parts
+.vscode/                       Visual Studio Code configuration (Run button, tasks, tests)
+docs/                          images; README.it.md = Italian README (snapshot)
+USER_GUIDE.txt                 user guide (English)
+GUIDA_USO.txt                  user guide (Italian)
 ```

@@ -1,0 +1,58 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Open the GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/section_infill_gui.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Section a model (asks for the file)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/section_infill.py",
+            "args": ["${input:modelPath}", "--out-dir", "${workspaceFolder}/output"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Check a G-code (asks for the files)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/analyze_gcode.py",
+            "args": ["${input:gcodePath}", "${input:sectionsJson}"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Run the tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["-q", "tests"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "modelPath",
+            "type": "promptString",
+            "description": "Full path of the STL or STEP model"
+        },
+        {
+            "id": "gcodePath",
+            "type": "promptString",
+            "description": "Full path of the .gcode or .gcode.3mf exported from Bambu Studio"
+        },
+        {
+            "id": "sectionsJson",
+            "type": "promptString",
+            "description": "Full path of the *_sections.json written by the program",
+            "default": "output/provino_sections.json"
+        }
+    ]
+}

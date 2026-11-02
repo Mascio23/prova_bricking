@@ -1,0 +1,513 @@
+============================================================================================
+USER GUIDE - INFILL SECTIONING AGAINST WARPING
+============================================================================================
+
+Program that implements the infill sectioning criterion of
+Shen, Veeramani, Qin (2026), "Warpage mitigation through infill sectioning in fused
+filament fabrication", IISE Transactions 58(1):57-69.
+
+What it does, in one sentence: it takes the 3D model of a part (STL or STEP), divides it
+into sub-regions with the thresholds of the paper, gives neighbouring regions alternating
+infill directions (45 and 135 degrees) and prepares a Bambu Studio project (.3mf) with
+everything already set up.
+
+Contents:
+  1. First installation
+  2. Using the graphical interface, step by step
+  3. Using Visual Studio Code (Run button)
+  4. Meaning of every field
+  5. Recipes for the most common cases
+  6. After "Generate": Bambu Studio
+  7. Checking the G-code
+  8. Tips for the DOE and the thesis
+  9. What has been verified and what has not
+ 10. Frequent problems
+ 11. Command line
+ 12. The files produced
+
+(An Italian version of this guide is GUIDA_USO.txt.)
+
+
+--------------------------------------------------------------------------------------------
+1. FIRST INSTALLATION
+--------------------------------------------------------------------------------------------
+
+You need Python 3.10 or later (on Windows the one from python.org is fine: it includes
+tkinter, which draws the window).
+
+a) Download the code from GitHub: repository mascio23/prova_bricking, branch
+   claude/warping-infill-sectioning-9cbi1f, button Code -> Download ZIP. Unzip it.
+   When the program is updated, download the ZIP again: an old version lacks the new
+   options ("unrecognized arguments" almost always means this).
+
+b) Open PowerShell INSIDE the unzipped folder (the one with section_infill_gui.py).
+   Tip: in File Explorer, in that folder, type "powershell" in the address bar and
+   press Enter. (Or use Visual Studio Code: see section 3.)
+
+c) Install the libraries, once:
+       python -m pip install -r requirements.txt
+   Only if you have STEP files (not STL):
+       python -m pip install cadquery-ocp
+
+d) Start the interface:
+       python section_infill_gui.py
+
+To check you have the right version:
+       python section_infill.py --help
+The list must show --export-3mf, --plate-rotation, --extra-angle, --infill-density.
+
+
+--------------------------------------------------------------------------------------------
+2. USING THE GRAPHICAL INTERFACE, STEP BY STEP
+--------------------------------------------------------------------------------------------
+
+The window has three tabs on the left, the preview and the log on the right, the
+equivalent command and the buttons at the bottom.
+
+STEP 1 - Tab "1. Part and files"
+  - Model (STL or STEP): press Browse... and choose the STL (or STEP) of the part.
+  - Output folder: where the files will be written (default: "output", inside the
+    program folder).
+  - File prefix: optional. If empty, the name of the model is used.
+  - Leave the three checkboxes ticked (PNG, STL, .3mf), unless you need fewer files.
+
+STEP 2 - Tab "2. Sectioning"
+  - For the rectangular specimen the default values are fine: maximum area 900, maximum
+    aspect ratio 2, angles 45 and 135.
+  - Leave the third-angle checkbox unticked (it is only for irregular shapes).
+
+STEP 3 - Tab "3. Bambu Studio project"
+  - Template (.3mf): choose the Bambu Studio project with your printer, your filament
+    and your process (see "How to prepare the template" in section 4).
+  - Set the sparse infill in every modifier: choose the density (100 = solid) and the
+    pattern.
+  - Rotate the part on the plate: tick it only if you want the part tilted.
+
+STEP 4 - "Preview regions"
+  Shows on the right how the part is sectioned, without writing anything in the output
+  folder. Check that the regions are what you expect. For the 100 x 20 mm specimen you
+  must see 4 regions of 25 x 20 mm, with angles 45, 135, 45, 135.
+
+STEP 5 - "Generate"
+  Writes all the files (see section 12). The log appears at the bottom right; at the end
+  the line at the bottom says "Done". If there is an error, the message is in the log.
+
+STEP 6 - "Open output folder"
+  Opens the folder with the files. The project to open in Bambu Studio is <prefix>.3mf.
+
+Other buttons:
+  - Copy command: copies to the clipboard the terminal command equivalent to what you
+    have set (shown in the "Equivalent command" box). Useful to repeat a run and to
+    document it.
+  - Save preset... / Load preset...: save and reload all the fields in a .json file.
+    Suggestion: one preset for each DOE condition.
+  - At start-up the window reopens the last configuration used.
+
+If a field is wrong (invalid number, two equal angles, density outside 0-100, a file that
+does not exist, an extra setting without "="), a list of errors appears and nothing runs.
+
+Unticked checkboxes write nothing: the related fields are greyed out and the option does
+not appear in the command.
+
+
+--------------------------------------------------------------------------------------------
+3. USING VISUAL STUDIO CODE (RUN BUTTON)
+--------------------------------------------------------------------------------------------
+
+Yes, the window can be opened from Visual Studio Code with the Run button. The program
+folder contains a ".vscode" folder with the configuration. One-time setup:
+
+  1. Install Visual Studio Code (code.visualstudio.com) and its "Python" extension (VS
+     Code proposes it when you open the folder).
+  2. File -> Open Folder... and choose the program folder (the one containing
+     section_infill_gui.py).
+  3. Choose the Python: Ctrl+Shift+P -> "Python: Select Interpreter". The chosen one is
+     shown at the bottom right.
+  4. Install the libraries FOR THAT INTERPRETER: Terminal -> Run Task... -> "Install
+     dependencies". (It runs pip install -r requirements.txt with the selected
+     interpreter.)
+
+To open the window:
+  - Open section_infill_gui.py and click the Run button (the "play" triangle, "Run Python
+    File") at the top right of the editor.
+  - Or press F5, or open the "Run and Debug" panel and choose "Open the GUI": this works
+    whichever file is open.
+
+Other launch configurations (F5 menu): "Section a model" (asks for the path of the STL),
+"Check a G-code" (asks for the G-code and the JSON), "Run the tests". Terminal -> Run
+Task... also has "Open the GUI" and "Run the tests", and the "Testing" view lists the
+pytest tests.
+
+If a library is missing for the selected interpreter, the program does not show a
+traceback: it opens a message with the EXACT command to type for that Python. This is the
+most frequent problem in VS Code: the interpreter selected is not the one where pip
+install was run. Solve it with the task "Install dependencies" or with the command in the
+message.
+
+Notes:
+  - I could not run Visual Studio Code itself where the configuration was written: I
+    validated the JSON files and checked that the script starts from another working
+    folder. If a menu name differs in your version, you can always run the same commands
+    from the terminal inside VS Code (Terminal -> New Terminal).
+  - If very long OneDrive paths (with spaces and apostrophes) misbehave, copy the program
+    to a short folder such as C:\infill and open that folder in VS Code.
+  - The configuration uses the debug type "debugpy" (current VS Code). If your VS Code is
+    old and complains, replace "debugpy" with "python" in .vscode/launch.json.
+
+
+--------------------------------------------------------------------------------------------
+4. MEANING OF EVERY FIELD
+--------------------------------------------------------------------------------------------
+
+TAB 1 - PART AND FILES
+  Model               STL or STEP. The part must have an essentially constant section
+                      along Z (plates, test specimens, wrenches): the program uses the
+                      footprint seen from above, and does not handle parts whose section
+                      changes a lot with height.
+  Output folder       Where the files are written.
+  File prefix         Beginning of the names of the files produced.
+  PNG                 Image with the footprint and the regions, coloured by angle.
+  Modifier STLs       One STL per region. Needed if you want to import the modifiers by
+                      hand in Bambu Studio. With the .3mf ticked they are written anyway.
+  .3mf project        The file ready to open in Bambu Studio.
+
+TAB 2 - SECTIONING
+  Maximum area [mm2]  A region is split in two if its area exceeds this value...
+  Max. aspect ratio   ...or if the ratio between the major and minor axis of its
+                      equivalent ellipse exceeds this value. The cut is along the minor
+                      axis, through the centroid, and is repeated on the two halves until
+                      all regions satisfy the thresholds. Values of the paper: 900 mm2 and
+                      2.
+  Angle 1, Angle 2    The two infill directions, alternated between neighbouring regions
+                      (45 and 135). They are angles RELATIVE TO THE PART (see rotation).
+  Third angle         See recipe 5.5. Normally not needed.
+  Mode                bisect = the method of the paper. nsplit = EXPERIMENTAL, divides
+                      into N equal slabs (on the 100 x 20 specimen it gives 3 slabs of
+                      33.3 mm). It is not the method of Shen et al.: do not cite it as
+                      such in the thesis. Useful only as a comparison.
+  Footprint           projection = shadow of the part on the XY plane (recommended).
+                      section = cross-section at mid height.
+  Minimum area        Safety stop: below this area it does not split any more.
+  Maximum depth       Another safety stop on successive splits.
+  Modifier margin     How far the modifiers extend beyond the part (2 mm on the outer
+  XY, Z               sides, 1 mm above). On the cut sides the modifiers touch without
+                      overlapping. They do not go below the base of the part.
+
+TAB 3 - BAMBU STUDIO PROJECT
+  Template            A .3mf project saved by Bambu Studio (File -> Save Project As).
+                      Printer, filament and process (temperatures, walls, layers, brim...)
+                      are copied from it. DO NOT use a .gcode.3mf: it is an already
+                      sliced plate, without the structure of a project.
+                      Without a template the .3mf contains none of these settings and
+                      Bambu Studio uses the presets selected at that moment.
+  Set the sparse      If ticked, every modifier receives the density and pattern chosen
+  infill              here. If unticked, the modifiers do not touch density and pattern:
+                      those of the template apply.
+  Density [%]         0-100. At 100 all layers are solid. Below 100, the bottom and top
+                      layers (and the internal solid ones) stay solid and keep the
+                      alternation; the infill of the intermediate layers changes.
+  Pattern             See the table of patterns below.
+  Rotate the part     Places the part tilted on the plate by these degrees
+  on the plate        (counter-clockwise seen from above) and corrects the angles so that
+                      relative to the part they stay 45 and 135. See recipe 5.3.
+  Other modifier      One per line, in the form KEY=VALUE, applied to all modifiers.
+  settings            Example: top_shell_layers=7. They override the other options. The
+                      keys are Bambu Studio configuration keys.
+
+HOW TO PREPARE THE TEMPLATE
+  1. In Bambu Studio choose the printer (H2D), the filament (the PA6 you really use) and
+     the process (layer height, walls, top/bottom, brim, bed temperature).
+  2. Import any object: it is only needed to be able to save, and will be ignored.
+  3. File -> Save Project As... and save as .3mf (for example template_H2D_PA6.3mf).
+  4. Use a different template for each condition that changes process parameters.
+
+SPARSE INFILL PATTERNS (tab 3, field Pattern)
+  rectilinear (default)   One direction per layer, rotating by 90 degrees at every layer.
+                          VERIFIED on the G-code: the alternation between regions works.
+  line, aligned-rectilinear  One direction per layer. Expected like rectilinear, NOT
+                          verified. Aligned does not reverse the direction between layers.
+  grid                    Prints the two diagonals together on every layer: the 45/135
+                          alternation on the sparse infill HAS NO EFFECT (verified on the
+                          G-code). It stays effective only on the solid layers.
+  all the others          (gyroid, cubic, honeycomb, triangles, ...) They do not have a
+                          single direction per layer: the effect of the alternation is
+                          not guaranteed and not verified. The program prints a warning.
+  Note: the "Rectilinear" entry of the Bambu Studio menu is stored with the internal name
+  "zig-zag". The program handles the difference: you choose "rectilinear".
+
+
+--------------------------------------------------------------------------------------------
+5. RECIPES FOR THE MOST COMMON CASES
+--------------------------------------------------------------------------------------------
+
+5.1  RECTANGULAR 100 x 20 x 4 mm SPECIMEN, SOLID INFILL
+     Tab 1: model, folder.  Tab 2: default values.
+     Tab 3: template, "Set the sparse infill" ticked, density 100, rectilinear.
+     Expected result: 4 regions of 25 x 20 mm (area 500 mm2, AR 1.25), angles
+     45/135/45/135.
+     Note: the bisection of the paper always gives 2, 4, 8... regions per branch. With
+     100 x 20 there are no 3 regions: 2 of 50 mm would have AR 2.5 and be out of
+     threshold.
+
+5.2  SAME SPECIMEN WITH SPARSE INFILL (for example 20%)
+     As above, but density 20. The bottom (3), internal solid and top (5, numbers from the
+     template) layers stay alternated; the intermediate layers change.
+     Exception to know: the first layer covering the sparse infill is an "internal
+     bridge", and Bambu Studio chooses its direction by itself. In the test G-code it is
+     the same in all regions (135 degrees). It is one layer out of 20 in the 4 mm
+     specimen, and occurs only with density below 100%. It must be declared in the
+     thesis.
+     To change the number of solid layers: in the template, or only for the modifiers
+     with the extra setting top_shell_layers=7 (or bottom_shell_layers=...).
+
+5.3  PART TILTED ON THE PLATE (for example on the diagonal)
+     In Bambu Studio the infill angle refers to the PLATE, not to the part. If you tilt
+     the part by 45 degrees leaving 45 and 135, the lines at 45 become parallel to the
+     axis of the part. To keep 45 and 135 relative to the part, tick "Rotate the part on
+     the plate" and write the rotation. Example: 42.4 (diagonal of the H2D, 350 x 320 mm:
+     atan(320/350)). The program rotates part and modifiers in the .3mf and adds the
+     rotation to the angles: 45 becomes 87.4 and 135 becomes 177.4 on the plate.
+     - 0 = long side along X; 90 = along Y.
+     - DO NOT rotate the part by hand in Bambu Studio after opening the project: the
+       modifiers would rotate with the part but the written angles would not, and the
+       compensation is lost. Regenerate the project with another rotation.
+     - The program warns if the rotated part leaves the printable area of the template.
+     - I could not verify in Bambu Studio the direction of the "Rotation Z" field in the
+       interface (the program writes a counter-clockwise rotation, as in the thumbnail):
+       check on your screen that the part is rotated in the expected direction.
+
+5.4  CONTROL SPECIMEN (WITHOUT SECTIONING)
+     The program is not needed: print the plain STL with the same template, without
+     modifiers. Compare sectioned and non-sectioned at the same density and the same
+     pattern, so that the only difference is the sectioning.
+
+5.5  IRREGULAR SHAPE: THIRD ANGLE
+     With non-rectangular shapes (T, large L, C, Z) two angles may not be enough: in some
+     places three regions touch each other. Tick "Third angle" and write for example 90.
+     The program uses the third angle ONLY where strictly needed and on the fewest
+     possible regions. If two angles are enough, the third does not appear. Where it
+     appears, the difference with the neighbouring regions is 45 degrees, not 90. If even
+     three angles are not enough (very fragmented shapes) conflicts remain, listed in the
+     log and in the report.
+
+5.6  LEAVING THE INFILL AS IN THE TEMPLATE
+     Untick "Set the sparse infill": the modifiers receive only the direction.
+     Warning: if the template uses Grid, the alternation on the sparse infill will have
+     no effect (the program warns).
+
+
+--------------------------------------------------------------------------------------------
+6. AFTER "GENERATE": BAMBU STUDIO
+--------------------------------------------------------------------------------------------
+
+  1. File -> Open Project and choose <output folder>\<prefix>.3mf.
+  2. In the object list you must see the part and the "..._modifier_XX_..." parts with
+     the modifier icon. Each modifier shows the infill direction (45 or 135, or the
+     rotated value) and, if you set them, density and pattern.
+  3. Slice. The plate must measure about the size of the part (for the 100 x 20 mm
+     specimen, plus the brim), not 104 x 24: if it is larger the modifiers were treated
+     as solid parts (it happened with the manual import without "Change type").
+  4. Look at the preview layer by layer: neighbouring regions must have perpendicular
+     lines.
+  5. For the numerical check, see section 7.
+
+Manual import (alternative): if you prefer to import part and modifiers yourself, use the
+STLs produced. File -> Import, select the part and all the modifiers together, answer Yes
+to the multi-part question, then for EVERY modifier: right-click -> Change type ->
+Modifier, and set the infill direction given in the file name (if the part is rotated by
+theta, use the "plate_angle_deg" value of the JSON file, not the one in the name). The
+automatic .3mf project avoids all this.
+
+
+--------------------------------------------------------------------------------------------
+7. CHECKING THE G-CODE
+--------------------------------------------------------------------------------------------
+
+This check proves in the thesis that the printed part really has the intended
+alternation. It is done from the terminal (it is not yet in the window); in VS Code use
+F5 -> "Check a G-code".
+
+  1. In Bambu Studio slice, then File -> Export -> Export plate sliced file. You get a
+     .gcode.3mf file.
+  2. In the program folder:
+       python analyze_gcode.py "C:\path\specimen.gcode.3mf" "output\specimen_sections.json"
+  3. The tool prints, for every layer and region, the dominant direction of the lines and
+     the extruded length, then checks two things:
+       - neighbouring regions have the configured angle difference (90 degrees for
+         45/135);
+       - the direction relative to the part is the configured one, even if the part is
+         rotated on the plate.
+     Bridge layers are not checked because their direction is automatic.
+  4. At the end it prints "OK" (exit code 0) or the list of problems (exit code 1).
+     With Grid, "45+135" appears in the cells of the sparse layers: two directions on the
+     same layer, no alternation.
+  If the JSON file was generated by an earlier version, or you rotated the part by hand in
+  Bambu Studio, use --rotation DEGREES (and --offset DX DY for non-symmetric parts).
+
+
+--------------------------------------------------------------------------------------------
+8. TIPS FOR THE DOE AND THE THESIS
+--------------------------------------------------------------------------------------------
+
+  - One preset per condition ("Save preset" button), and one template for each set of
+    process parameters. In this way every generated project documents the print
+    conditions.
+  - "Copy command" produces the line to paste in the thesis to reproduce the run.
+  - The JSON file (<prefix>_sections.json) contains parameters, areas, aspect ratios,
+    angles (relative to the part and on the plate), region polygons and the position on
+    the plate.
+  - Density and pattern are factors of their own: compare sectioned and non-sectioned at
+    the same value of both.
+  - Print the conditions in random order and, if you can, on the same plate on the same
+    day: warping depends a lot on bed temperature and ambient conditions.
+  - Declare in the thesis: Bambu Studio version, template used, density, pattern, number
+    of solid layers, rotation on the plate, and the exception of the internal bridge.
+  - The method of Shen et al. is "bisect". "nsplit" is experimental: if you use it, say
+    so.
+
+
+--------------------------------------------------------------------------------------------
+9. WHAT HAS BEEN VERIFIED AND WHAT HAS NOT
+--------------------------------------------------------------------------------------------
+
+VERIFIED
+  - Sectioning of the 100 x 20 rectangle: 4 regions of 25 x 20 mm (automatic tests).
+  - Image moments: exact computation on the polygon, compared with cv2.moments on the
+    rasterised footprint.
+  - Structure of the .3mf: compared with a project saved by Bambu Studio 2.08 (same
+    transforms, position on the plate, geometry, settings), and read with lib3mf.
+  - On your 20% G-code (H2D, Bambu Studio 2.08, rectilinear): all the bottom, internal
+    solid, sparse and top layers alternate 45/135 between neighbouring regions; the
+    internal bridge layer does not. The 20% density is confirmed by the spacing between
+    the lines.
+  - On the G-code of the first test with Grid: no alternation on the sparse layers.
+  - The G-code checker works on synthetic G-code with a rotated part (automatic tests).
+  - The start-up message for missing libraries (automatic test).
+  - The window starts and works under a virtual display on Linux (automatic tests: the
+    preview, Generate, presets, validation).
+
+NOT VERIFIED
+  - Opening and slicing in Bambu Studio of a project made with a plate rotation (the
+    direction of the rotation is consistent with the 3MF format and with the Bambu Studio
+    sources, but I have not seen it in Bambu Studio).
+  - Patterns other than rectilinear and grid.
+  - The interface on Windows and the VS Code configuration in VS Code itself (tested on
+    Linux with a virtual display, JSON files validated).
+  - Any effect of the alternation on warping itself: the program prepares the
+    configuration, measuring the warping is your experiment.
+  - The Bambu Studio menu names quoted here are those of version 2.08.
+
+
+--------------------------------------------------------------------------------------------
+10. FREQUENT PROBLEMS
+--------------------------------------------------------------------------------------------
+
+"unrecognized arguments: --export-3mf ..." in PowerShell
+  You have an old version of the program: download the ZIP again. In PowerShell the "\" at
+  the end of a line does NOT continue the command (the backtick ` is used, preceded by a
+  space): better to write the command on a single line. Put a space between the file name
+  and "--out-dir". Paths with spaces go in double quotes.
+
+A message "Missing libraries" opens when I run the window
+  The Python in use does not have the libraries. Type the command shown in the message
+  (it contains the exact path of that Python), or in VS Code run the task "Install
+  dependencies" and check the interpreter at the bottom right.
+
+"tkinter is not available"
+  Windows/macOS: reinstall Python from python.org (keep "tcl/tk and IDLE" ticked).
+  Linux: sudo apt install python3-tk
+
+Bambu Studio stays loading when I open the .3mf
+  Use the updated version of the program (the format was corrected). If the part is large
+  there can be dozens of modifiers: the program reports it ("large project"); increase
+  the maximum area or aspect ratio, or simplify the mesh. If it hangs, close it from Task
+  Manager and send me the file.
+
+The plate is larger than the part (104 x 24 instead of 100 x 20)
+  The modifiers were printed as solid parts. With the automatic .3mf project this does not
+  happen; with the manual import remember "Change type -> Modifier" for every modifier.
+
+Neighbouring regions are not perpendicular in the Bambu Studio preview
+  Check the pattern: with Grid (or other multi-direction patterns) the sparse infill does
+  not alternate. Use rectilinear. Then verify with section 7.
+
+A warning about a pattern appears
+  It is intended: the chosen pattern does not print a single direction per layer. The
+  project is generated anyway.
+
+"adjacent regions with the same angle" (conflicts) in the log
+  Shape with T-junctions: use the third angle (recipe 5.5).
+
+The program says the rotated part leaves the printable area
+  Reduce the rotation, use a smaller part, or check that the template is the one of your
+  printer (the area is read from the template).
+
+Error reading a STEP file
+  python -m pip install cadquery-ocp. Alternatively export the part as STL.
+
+
+--------------------------------------------------------------------------------------------
+11. COMMAND LINE
+--------------------------------------------------------------------------------------------
+
+Everything the window does can be done from the terminal (the window shows the command).
+Always on a single line in PowerShell, inside the program folder.
+
+Sectioning, report and image only:
+  python section_infill.py "specimen.stl" --out-dir output
+
+With Bambu Studio project, solid infill:
+  python section_infill.py "specimen.stl" --out-dir output --export-3mf --template-3mf "template_H2D_PA6.3mf"
+
+Sparse infill at 20%, rectilinear:
+  python section_infill.py "specimen.stl" --out-dir output_20 --export-3mf --template-3mf "template_H2D_PA6.3mf" --infill-density 20
+
+Part on the diagonal of the plate:
+  python section_infill.py "specimen.stl" --out-dir output_rot --export-3mf --template-3mf "template_H2D_PA6.3mf" --plate-rotation 42.4
+
+Irregular shape with the third angle where needed:
+  python section_infill.py "part.stl" --out-dir output --extra-angle 90 --export-3mf --template-3mf "template_H2D_PA6.3mf"
+
+G-code check:
+  python analyze_gcode.py "specimen.gcode.3mf" "output\specimen_sections.json"
+
+Main options:
+  --max-area MM2          maximum area of a region (default 900)
+  --max-ar AR             maximum aspect ratio (default 2)
+  --angles A1 A2          the two angles (default 45 135)
+  --extra-angle DEGREES   third angle, only where needed
+  --mode bisect|nsplit    bisect = method of the paper; nsplit = experimental
+  --export-3mf            writes the Bambu Studio project
+  --template-3mf FILE     project from which printer, filament, process are copied
+  --infill-density PCT    sparse infill density of the modifiers (default 100)
+  --infill-pattern NAME   pattern (default rectilinear)
+  --inherit-infill        do not write density and pattern: those of the template apply
+  --plate-rotation DEG    rotation of the part on the plate, with compensated angles
+  --3mf-setting K=V       extra setting for every modifier (repeatable)
+  --margin-xy, --margin-z extension of the modifiers
+  --no-stl, --no-png      do not write the STLs / the PNG
+  --prefix NAME           prefix of the files
+Full list: python section_infill.py --help
+
+
+--------------------------------------------------------------------------------------------
+12. THE FILES PRODUCED
+--------------------------------------------------------------------------------------------
+
+With prefix "specimen" in the output folder:
+
+  specimen.3mf                       Project for Bambu Studio (only with .3mf ticked)
+  specimen_sections.json             Report: parameters, areas, aspect ratios, angles,
+                                     polygons, position on the plate, warnings
+  specimen_sections.png              Image with the regions coloured by angle
+  specimen_modifier_00_45deg.stl     One file per region, in the same coordinate system
+  specimen_modifier_01_135deg.stl    as the part. The number is the region, the suffix is
+  ...                                its angle relative to the part.
+
+The JSON file is the source for analyze_gcode.py and for documenting the runs.
+
+
+============================================================================================
+The complete program, the tests and the technical documentation are in the repository.
+For details, see also README.md.
+============================================================================================

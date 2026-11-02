@@ -11,9 +11,41 @@ sotto-regioni con le soglie del paper, assegna alle regioni vicine direzioni di 
 alternate (45 e 135 gradi) e prepara un progetto di Bambu Studio (.3mf) con tutto gia'
 configurato.
 
+NOVITA': l'interfaccia grafica e tutti i messaggi del programma sono ora in INGLESE. In
+questa guida (in italiano) i nomi dei campi e dei pulsanti compaiono ancora in italiano:
+usa questa tabella per ritrovarli nella finestra.
+
+  Scheda "1. Pezzo e file"          ->  "1. Part and files"
+  Scheda "2. Sezionamento"          ->  "2. Sectioning"
+  Scheda "3. Progetto Bambu Studio" ->  "3. Bambu Studio project"
+  Modello (STL o STEP)              ->  Model (STL or STEP)
+  Cartella di output                ->  Output folder
+  Prefisso dei file                 ->  File prefix
+  Area massima / Aspect ratio max   ->  Maximum area / Maximum aspect ratio
+  Angolo 1, Angolo 2                ->  Angle 1, Angle 2
+  Terzo angolo                      ->  Third angle
+  Avanzate: Modalita', Sagoma       ->  Advanced: Mode, Footprint
+  Area minima, Profondita' massima  ->  Minimum area, Maximum depth
+  Margine modifier XY, Z            ->  Modifier margin XY, Z
+  Template                          ->  Template
+  Imposta l'infill sparso           ->  Set the sparse infill
+  Densita', Pattern                 ->  Density, Pattern
+  Ruota il pezzo sul piatto         ->  Rotate the part on the plate
+  Rotazione                         ->  Rotation
+  Altre impostazioni dei modifier   ->  Other modifier settings
+  Anteprima regioni                 ->  Preview regions
+  Genera                            ->  Generate
+  Apri cartella di output           ->  Open output folder
+  Copia comando                     ->  Copy command
+  Salva preset / Carica preset      ->  Save preset / Load preset
+  Comando equivalente               ->  Equivalent command
+
+E' disponibile anche la guida in inglese: USER_GUIDE.txt.
+
 Il testo e' diviso cosi':
   1. Prima installazione
   2. Uso con l'interfaccia grafica, passo per passo
+  2b. Uso con Visual Studio Code (pulsante Run)
   3. Significato di ogni campo
   4. Ricette per i casi piu' comuni
   5. Dopo "Genera": Bambu Studio
@@ -46,7 +78,7 @@ c) Installa le librerie, una volta sola:
    Solo se hai file STEP (non STL):
        pip install cadquery-ocp
 
-d) Avvia l'interfaccia:
+d) Avvia l'interfaccia (oppure usa il pulsante Run di VS Code, sezione 2b):
        python section_infill_gui.py
 
 Per controllare di avere la versione giusta:
@@ -107,6 +139,43 @@ e non parte nulla.
 
 Le caselle non spuntate non scrivono nulla: i campi collegati si disattivano e
 l'opzione non compare nel comando.
+
+
+--------------------------------------------------------------------------------------------
+2b. USO CON VISUAL STUDIO CODE (PULSANTE RUN)
+--------------------------------------------------------------------------------------------
+
+Si': la finestra si puo' aprire da Visual Studio Code con il pulsante Run. Nella cartella
+del programma c'e' una cartella ".vscode" con la configurazione. Preparazione, una volta:
+
+  1. Installa Visual Studio Code (code.visualstudio.com) e l'estensione "Python" (VS Code
+     la propone quando apri la cartella).
+  2. File -> Open Folder... e scegli la cartella del programma (quella che contiene
+     section_infill_gui.py).
+  3. Scegli il Python: Ctrl+Shift+P -> "Python: Select Interpreter". Quello scelto compare
+     in basso a destra.
+  4. Installa le librerie PER QUELL'INTERPRETE: Terminal -> Run Task... -> "Install
+     dependencies" (esegue pip install -r requirements.txt con l'interprete selezionato).
+
+Per aprire la finestra:
+  - Apri section_infill_gui.py e clicca il pulsante Run (il triangolo, "Run Python File")
+    in alto a destra nell'editor.
+  - Oppure premi F5, o apri il pannello "Run and Debug" e scegli "Open the GUI": funziona
+    qualunque file sia aperto.
+
+Altre configurazioni (menu F5): "Section a model" (chiede il percorso dello STL), "Check a
+G-code" (chiede G-code e JSON), "Run the tests". Anche Terminal -> Run Task... ha "Open
+the GUI" e "Run the tests", e la vista "Testing" elenca i test.
+
+Se manca una libreria per l'interprete selezionato, il programma non mostra un traceback:
+apre un messaggio con il comando ESATTO da scrivere per quel Python. E' il problema piu'
+frequente in VS Code: l'interprete selezionato non e' quello in cui hai fatto pip install.
+
+Note: non ho potuto eseguire Visual Studio Code dove ho scritto la configurazione (ho
+validato i file JSON e verificato che lo script parta da un'altra cartella di lavoro). Se
+il nome di un menu e' diverso nella tua versione, puoi eseguire gli stessi comandi dal
+terminale di VS Code. Se i percorsi lunghi di OneDrive (con spazi e apostrofi) danno
+problemi, copia il programma in una cartella corta come C:\infill.
 
 
 --------------------------------------------------------------------------------------------

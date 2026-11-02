@@ -80,7 +80,7 @@ def test_invalid_form_shows_errors_and_runs_nothing(app, tmp_path):
     s = FormState(model=make_model(tmp_path), out_dir=str(tmp_path / "o"), max_area="abc")
     app.set_state(s)
     app.generate()
-    assert errors and "Area massima" in errors[-1]
+    assert errors and "Maximum area" in errors[-1]
     assert not (tmp_path / "o").exists() and not app.busy
 
 
@@ -101,7 +101,7 @@ def test_preview_then_generate(app, tmp_path):
     assert (out / "provino.3mf").exists() and (out / "provino_sections.json").exists()
     rep = json.loads((out / "provino_sections.json").read_text())
     assert rep["parameters"]["plate_rotation_deg"] == 30.0
-    assert "Fatto" in app.status.cget("text")
+    assert "Done" in app.status.cget("text")
 
 
 def test_error_of_the_program_is_shown_in_the_log(app, tmp_path):
@@ -111,7 +111,7 @@ def test_error_of_the_program_is_shown_in_the_log(app, tmp_path):
     app._check_form = lambda: s
     app.generate()
     wait(app)
-    assert "Errore" in app.status.cget("text")
+    assert "Error" in app.status.cget("text")
     assert app.log.get("1.0", "end").strip()
 
 

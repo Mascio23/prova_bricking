@@ -70,12 +70,12 @@ def test_preview_arguments(tmp_path):
 
 
 @pytest.mark.parametrize("field, value, expected", [
-    ("max_area", "abc", "Area massima"), ("max_area", "0", "Area massima"),
-    ("max_ar", "0.5", "Aspect ratio"), ("angle2", "225", "coincidono"),
-    ("density", "120", "Densità"), ("pattern", "rettilineo", "Pattern"),
-    ("rotation", "x", "Rotazione"), ("max_depth", "2.5", "intero"),
-    ("extra_settings", "senza uguale", "CHIAVE=VALORE"), ("model", "", "Modello"),
-    ("template", "/non/esiste.3mf", "Template"), ("png_dpi", "5", "PNG"),
+    ("max_area", "abc", "Maximum area"), ("max_area", "0", "Maximum area"),
+    ("max_ar", "0.5", "aspect ratio"), ("angle2", "225", "coincide"),
+    ("density", "120", "density"), ("pattern", "rettilineo", "Pattern"),
+    ("rotation", "x", "Rotation"), ("max_depth", "2.5", "whole number"),
+    ("extra_settings", "no equals sign", "KEY=VALUE"), ("model", "", "Model"),
+    ("template", "/no/such/file.3mf", "Template"), ("png_dpi", "5", "PNG"),
 ])
 def test_validation_messages(tmp_path, field, value, expected):
     kw = {field: value, **({"use_rotation": True} if field == "rotation" else {})}
@@ -84,7 +84,7 @@ def test_validation_messages(tmp_path, field, value, expected):
 
 
 def test_extra_angle_validation(tmp_path):
-    assert any("Terzo angolo" in p for p in
+    assert any("Third angle" in p for p in
                state(tmp_path, use_extra_angle=True, extra_angle="45").validate())
     assert state(tmp_path, use_extra_angle=False, extra_angle="45").validate() == []
 
