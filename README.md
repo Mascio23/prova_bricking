@@ -50,10 +50,10 @@ python section_infill_gui.py
 
 The window has three tabs:
 1. **Part and files**: model (STL or STEP), output folder, prefix, and what to write
-   (PNG, modifier STLs, `.3mf` project).
+   (clean PNG, PNG with details, modifier STLs, `.3mf` project).
 2. **Sectioning**: maximum area and aspect ratio, the two angles, the **third angle,
    only where needed** checkbox and, under *Advanced*, mode, footprint, minimum area,
-   depth and modifier margins.
+   minimum region width, depth and modifier margins.
 3. **Bambu Studio project**: template, the **Set the sparse infill** checkbox (density
    and pattern, chosen among the Bambu patterns), the **Rotate the part on the plate**
    checkbox (with the degrees) and a box for other modifier settings, one per line
@@ -134,6 +134,7 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--margin-z` | 1.0 | how far the modifiers extend above the part [mm] |
 | `--footprint` | `projection` | `projection` = shadow of the mesh on XY; `section` = cross-section at mid height |
 | `--min-area` | 1.0 | below this area [mm²] a region is not bisected any more (safety stop) |
+| `--min-width` | 2.0 | regions narrower than this [mm] (mean width `2·area/perimeter`) are slivers: they are not split and are merged into the neighbours (0 = off) |
 | `--max-depth` | 12 | maximum recursion depth |
 | `--step-tolerance` | 0.05 | linear deflection of the STEP tessellation [mm] |
 | `--raster-pixel` | 0.1 | pixel [mm] of the `cv2.moments` cross-check of the moments (0 = skip) |
@@ -145,8 +146,9 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--infill-density PCT` | 100 | sparse infill density [%] of every modifier in the `.3mf` (0–100) |
 | `--infill-pattern` | `rectilinear` | sparse infill pattern, with the Bambu Studio menu name (spaces → hyphens): see the pattern table below |
 | `--3mf-setting KEY=VALUE` | | additional override for every modifier in the `.3mf`, repeatable |
-| `--no-stl`, `--no-png` | | do not write the STLs / the PNG |
-| `--png-dpi` | 200 | resolution of the PNG |
+| `--no-stl`, `--no-png` | | do not write the STLs / the PNGs |
+| `--no-png-details` | | write only the clean PNG, not the one with the details |
+| `--png-dpi` | 200 | resolution of the PNGs |
 
 To generate test parts (100×20×4 specimen, L, plate with hole, wrench):
 
@@ -162,7 +164,8 @@ With `--out-dir output` and input `provino.stl`:
 | File | Content |
 |---|---|
 | `provino_sections.json` | parameters, moments of the part, vector/raster check of the moments; for each region: polygon, bbox, area, AR, centroid, angle (relative to the part and on the plate), depth, bisection path, neighbours, modifier STL |
-| `provino_sections.png` | footprint, regions coloured and hatched according to the angle, cuts, equivalent ellipses, modifier outlines |
+| `provino_sections.png` | clean preview: footprint, regions coloured and hatched according to the angle, region numbers, cuts, modifier outlines |
+| `provino_sections_details.png` | the same plus, for every region, angle, area and aspect ratio, and the equivalent ellipses (`--no-png-details` skips it) |
 | `provino_modifier_00_45deg.stl`, … | one prism per region, **in the same coordinate system as the part**. The number is the region id, the suffix is the angle to assign |
 | `provino.3mf` | (only with `--export-3mf`) Bambu Studio project with part + configured modifiers |
 
@@ -209,6 +212,19 @@ The procedure is repeated on both halves.
   piece becomes a region of its own and goes on independently.
 - `--min-area` and `--max-depth` are safety stops. Regions that stop because of these
   limits are marked `within_thresholds: false` in the JSON and "(!)" in the PNG.
+- **Slivers** (`--min-width`, default 2 mm). When a cut runs close to an edge it leaves a
+  thin strip between the cut and the edge. Such a strip has a huge aspect ratio, so the
+  bisection would keep halving it and produce dozens of regions of ~1 mm² (on a 266 ×
+  120 mm plate with three windows: 58 regions, 24 of them slivers). A piece whose mean
+  width `2·area/perimeter` is below `--min-width` is therefore not split; afterwards every
+  sliver is merged into the neighbouring regions: the regions grow into it by small
+  steps, so a long strip is divided among the regions it touches, and no area is lost
+  or counted twice (the partition stays exact). 2 mm is about two walls per side: a
+  narrower piece contains no infill anyway. The same plate gives 34 regions, none out of
+  threshold. A merged region can exceed a threshold slightly: it is then flagged "(!)".
+  A thin part that cannot be merged (the far end of a thin rib) stays a region of its
+  own, flagged `sliver`. `--min-width 0` restores the old behaviour. This is an
+  addition of this program, not a step of the method of Shen et al.
 
 **Angles.**
 - Two regions are neighbours if they share a stretch of boundary (> 0.01 mm). Touching

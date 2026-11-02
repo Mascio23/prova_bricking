@@ -114,3 +114,18 @@ def test_the_command_really_runs(tmp_path):
     rep = json.loads((out / "provino_sections.json").read_text())
     assert rep["parameters"]["plate_rotation_deg"] == 30.0
     assert (out / "provino.3mf").exists()
+
+
+def test_png_details_and_min_width_options(tmp_path):
+    s = state(tmp_path)
+    argv = s.to_argv()
+    assert "--no-png-details" not in argv and "--min-width" not in argv  # defaults
+    assert section_infill.parse_args(argv).min_width == 2.0
+    argv = state(tmp_path, write_png_details=False, min_width="0,5").to_argv()
+    assert "--no-png-details" in argv and argv[argv.index("--min-width") + 1] == "0.5"
+    # no PNG at all: nothing about its details
+    assert "--no-png-details" not in state(tmp_path, write_png=False,
+                                           write_png_details=False).to_argv()
+    # the preview only needs the clean image
+    assert "--no-png-details" in s.to_argv(preview_dir=tmp_path / "pv")
+    assert any("Minimum region width" in p for p in state(tmp_path, min_width="-1").validate())

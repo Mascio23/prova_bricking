@@ -43,6 +43,11 @@ def parse_args(argv=None):
                         "(e.g. 90)")
     p.add_argument("--min-area", type=float, default=1.0,
                    help="never create regions smaller than this [mm^2] (safety stop)")
+    p.add_argument("--min-width", type=float, default=2.0, metavar="MM",
+                   help="regions narrower than this [mm] (mean width 2*area/perimeter) are "
+                        "slivers left by a cut close to an edge: they are not split further "
+                        "and are merged into the neighbouring regions. About two walls per "
+                        "side: a narrower piece contains no infill. 0 = off (default 2)")
     p.add_argument("--max-depth", type=int, default=12, help="max recursion depth")
     p.add_argument("--footprint", choices=["projection", "section"], default="projection",
                    help="footprint extraction method (default projection)")
@@ -85,7 +90,10 @@ def parse_args(argv=None):
                    help="extra per-modifier override written into the .3mf, repeatable "
                         "(e.g. sparse_infill_pattern=zig-zag, sparse_infill_density=100%%)")
     p.add_argument("--no-stl", action="store_true", help="do not write modifier STLs")
-    p.add_argument("--no-png", action="store_true", help="do not write the PNG preview")
+    p.add_argument("--no-png", action="store_true", help="do not write the PNG previews")
+    p.add_argument("--no-png-details", action="store_true",
+                   help="write only the clean PNG (region numbers), not the one with angle, "
+                        "area, aspect ratio and ellipses (<prefix>_sections_details.png)")
     p.add_argument("--png-dpi", type=int, default=200, help="resolution of the PNG preview")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p.parse_args(argv)
@@ -117,7 +125,8 @@ def run(args) -> dict:
     try:
         result = section(part, args.max_area, args.max_ar, mode=args.mode,
                          min_area=args.min_area, max_depth=args.max_depth,
-                         angles=tuple(args.angles), extra_angle=args.extra_angle)
+                         angles=tuple(args.angles), extra_angle=args.extra_angle,
+                         min_width=args.min_width)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
 
@@ -133,6 +142,7 @@ def run(args) -> dict:
     params = {
         "mode": args.mode, "max_area_mm2": args.max_area, "max_ar": args.max_ar,
         "angles_deg": list(args.angles), "min_area_mm2": args.min_area,
+        "min_width_mm": args.min_width,
         "max_depth": args.max_depth, "footprint_method": args.footprint,
         "margin_xy_mm": args.margin_xy, "margin_z_mm": args.margin_z,
     }
@@ -164,6 +174,9 @@ def run(args) -> dict:
         title = (f"{args.model.name} — {len(result.regions)} regions  "
                  f"(mode={args.mode}, max area={args.max_area:g} mm², max AR={args.max_ar:g})")
         write_png(result, out / f"{prefix}_sections.png", title, mod_files, dpi=args.png_dpi)
+        if not args.no_png_details:
+            write_png(result, out / f"{prefix}_sections_details.png", title, mod_files,
+                      dpi=args.png_dpi, details=True)
     return report
 
 

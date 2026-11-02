@@ -416,3 +416,78 @@ def test_png_with_many_regions_is_written(tmp_path):
     rep = json.loads((out / "frame_sections.json").read_text())
     assert rep["summary"]["n_regions"] > 16
     assert (out / "frame_sections.png").stat().st_size > 10_000
+
+
+# --------------------------------------------------------------------------- #
+# slivers: thin strips left between a cut and an edge
+# --------------------------------------------------------------------------- #
+from infill_sectioning.sectioning import thickness  # noqa: E402
+
+
+def plate_with_windows_close_to_a_cut():
+    """266 x 120 mm plate with three windows; the third has its edge at 77.5, so a slanted
+    cut leaves a wedge ~1.7 mm wide between the cut and the window (the plate of a real
+    test: it used to give 58 regions, 24 of them ~1.5 mm2 slivers)."""
+    g = box(-133, -60, 133, 60).buffer(-8).buffer(8, quad_segs=16)
+    for w in (box(-112, -40, 22, 40), box(43, -40, 63, 40), box(77.5, -40, 97, 40)):
+        g = g.difference(w)
+    return g
+
+
+def test_without_the_width_limit_a_sliver_is_split_into_dozens_of_regions():
+    res = section(plate_with_windows_close_to_a_cut(), 900, 2.0, min_width=0.0)
+    assert len(res.regions) >= 50
+    assert sum(1 for r in res.regions if thickness(r.geom) < 1.0) >= 20
+
+
+def test_slivers_are_merged_into_the_neighbours():
+    part = plate_with_windows_close_to_a_cut()
+    res = section(part, 900, 2.0)  # default min_width = 2 mm
+    assert len(res.regions) < 40
+    assert min(thickness(r.geom) for r in res.regions) >= 2.0
+    assert all(r.within_thresholds for r in res.regions)
+    check_partition(res, 900, 2.0)  # exact: no area lost, none counted twice
+    # the plate has T-junctions: two angles are not always enough, the third resolves them
+    assert section(part, 900, 2.0, extra_angle=90.0).conflicts == []
+
+
+def test_modifiers_still_cover_the_part_after_merging_slivers():
+    res = section(plate_with_windows_close_to_a_cut(), 900, 2.0)
+    mods = modifier_footprints(res, margin=2.0)
+    assert res.part.difference(unary_union(mods)).area < 1e-4 * res.part.area
+    for i, mi in enumerate(mods):
+        for j, r in enumerate(res.regions):
+            if j != i:
+                assert mi.intersection(r.geom).area < 1e-4 * res.part.area
+
+
+def test_an_isolated_thin_rib_stays_a_region_flagged_as_sliver():
+    part = unary_union([box(0, 0, 60, 40), box(60, 19, 160, 20.5)])  # 100 x 1.5 mm rib
+    res = section(part, 900, 2.0)
+    slivers = [r for r in res.regions if r.stop_reason == "sliver"]
+    assert slivers and all(not r.within_thresholds for r in slivers)
+    cov = coverage_error(res)
+    assert cov["uncovered_area"] < 1e-5 * cov["part_area"]
+    assert cov["overlap_area"] < 1e-5 * cov["part_area"]
+    # width limit off: the rib is bisected like any other part
+    assert len(section(part, 900, 2.0, min_width=0.0).regions) > len(res.regions)
+
+
+def test_cli_writes_the_clean_and_the_detailed_png(tmp_path):
+    mesh = trimesh.creation.extrude_polygon(t_shape(), height=4.0)
+    mesh.export(tmp_path / "t.stl")
+    out = tmp_path / "o"
+    section_infill.main([str(tmp_path / "t.stl"), "--out-dir", str(out), "--png-dpi", "80",
+                         "--extra-angle", "90"])
+    clean, detailed = out / "t_sections.png", out / "t_sections_details.png"
+    assert clean.stat().st_size > 5_000 and detailed.stat().st_size > 5_000
+    assert clean.read_bytes() != detailed.read_bytes()
+    rep = json.loads((out / "t_sections.json").read_text())
+    assert rep["parameters"]["min_width_mm"] == 2.0
+    out2 = tmp_path / "o2"
+    section_infill.main([str(tmp_path / "t.stl"), "--out-dir", str(out2), "--png-dpi", "80",
+                         "--no-png-details", "--min-width", "0"])
+    assert (out2 / "t_sections.png").exists() and not (out2 / "t_sections_details.png").exists()
+    out3 = tmp_path / "o3"
+    section_infill.main([str(tmp_path / "t.stl"), "--out-dir", str(out3), "--no-png"])
+    assert not list(out3.glob("*.png"))

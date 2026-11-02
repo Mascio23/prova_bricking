@@ -166,7 +166,12 @@ TAB 1 - PART AND FILES
                       changes a lot with height.
   Output folder       Where the files are written.
   File prefix         Beginning of the names of the files produced.
-  PNG                 Image with the footprint and the regions, coloured by angle.
+  PNG                 Clean image: footprint and regions, coloured by angle, with the
+                      region numbers only.
+  PNG with details    A second image (<prefix>_sections_details.png) that also shows,
+                      for every region, angle, area and aspect ratio, and the equivalent
+                      ellipses. With many regions the labels of the smallest ones can
+                      overlap: the numbers are all in the JSON file.
   Modifier STLs       One STL per region. Needed if you want to import the modifiers by
                       hand in Bambu Studio. With the .3mf ticked they are written anyway.
   .3mf project        The file ready to open in Bambu Studio.
@@ -192,6 +197,13 @@ TAB 2 - SECTIONING
   Footprint           projection = shadow of the part on the XY plane (recommended).
                       section = cross-section at mid height.
   Minimum area        Safety stop: below this area it does not split any more.
+  Minimum region      Default 2 mm. When a cut runs close to an edge it leaves a thin
+  width               strip; without this limit the program would halve it again and
+                      again, giving dozens of tiny regions. A piece narrower than this
+                      (mean width = 2 x area / perimeter) is not split and is merged into
+                      the neighbouring regions, which share it among them. 2 mm is about
+                      two walls per side: a narrower piece has no infill anyway. 0 = off.
+                      A merged region that exceeds a threshold slightly is flagged "(!)".
   Maximum depth       Another safety stop on successive splits.
   Modifier margin     How far the modifiers extend beyond the part (2 mm on the outer
   XY, Z               sides, 1 mm above). On the cut sides the modifiers touch without
@@ -488,8 +500,10 @@ Main options:
   --inherit-infill        do not write density and pattern: those of the template apply
   --plate-rotation DEG    rotation of the part on the plate, with compensated angles
   --3mf-setting K=V       extra setting for every modifier (repeatable)
+  --min-width MM          merge slivers narrower than this (default 2, 0 = off)
   --margin-xy, --margin-z extension of the modifiers
-  --no-stl, --no-png      do not write the STLs / the PNG
+  --no-stl, --no-png      do not write the STLs / the PNGs
+  --no-png-details        write only the clean PNG
   --prefix NAME           prefix of the files
 Full list: python section_infill.py --help
 
@@ -503,7 +517,8 @@ With prefix "specimen" in the output folder:
   specimen.3mf                       Project for Bambu Studio (only with .3mf ticked)
   specimen_sections.json             Report: parameters, areas, aspect ratios, angles,
                                      polygons, position on the plate, warnings
-  specimen_sections.png              Image with the regions coloured by angle
+  specimen_sections.png              Clean image: regions coloured by angle, numbers only
+  specimen_sections_details.png      Same, plus angle, area, aspect ratio, ellipses
   specimen_modifier_00_45deg.stl     One file per region, in the same coordinate system
   specimen_modifier_01_135deg.stl    as the part. The number is the region, the suffix is
   ...                                its angle relative to the part.

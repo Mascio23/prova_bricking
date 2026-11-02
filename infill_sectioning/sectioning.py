@@ -103,9 +103,20 @@ def _extent_size(geom) -> float:
     return 4.0 * max(maxx - minx, maxy - miny) + 100.0
 
 
+def thickness(geom) -> float:
+    """Mean width of a region: 2 * area / perimeter (the width of a long strip, ~side/2 of
+    a square). Small values mean a sliver."""
+    return 2.0 * geom.area / geom.length if geom.length > 0 else 0.0
+
+
 def bisect_regions(part, max_area: float, max_ar: float, min_area: float = 1.0,
-                   max_depth: int = 12):
-    """Recursive bisection of the footprint. Returns (regions, cut_segments)."""
+                   max_depth: int = 12, min_width: float = 0.0):
+    """Recursive bisection of the footprint. Returns (regions, cut_segments).
+
+    A piece thinner than `min_width` (see `thickness`) is not bisected any more: it is a
+    sliver (a cut ran close to an edge), and halving it again and again would only
+    produce dozens of useless regions. It is left as a region marked "sliver" for
+    `absorb_slivers`."""
     sliver = 1e-9 * part.area
     regions: list[Region] = []
     cuts = []
@@ -116,6 +127,9 @@ def bisect_regions(part, max_area: float, max_ar: float, min_area: float = 1.0,
     while stack:
         geom, depth, path, cell = stack.pop(0)
         m = polygon_moments(geom)
+        if min_width > 0 and thickness(geom) < min_width:
+            regions.append(Region(geom, m, depth, path, False, "sliver", cell=cell))
+            continue
         if not violates(m, max_area, max_ar):
             regions.append(Region(geom, m, depth, path, True, "within thresholds", cell=cell))
             continue
@@ -143,6 +157,71 @@ def bisect_regions(part, max_area: float, max_ar: float, min_area: float = 1.0,
                 suffix = str(side) + (chr(ord("a") + k) if len(comps) > 1 else "")
                 stack.append((comp, depth + 1, path + suffix, sub))
     return regions, cuts
+
+
+def _polygonal(geom):
+    """Only the areas of a geometry (intersections can also give lines and points)."""
+    parts = [g for g in getattr(geom, "geoms", [geom]) if isinstance(g, Polygon) and not g.is_empty]
+    if not parts:
+        return Polygon()
+    return unary_union(parts)
+
+
+def absorb_slivers(regions: list[Region], min_width: float, max_area: float, max_ar: float):
+    """Give the slivers (regions stopped as "sliver") to the neighbouring regions.
+
+    Every sliver point goes to the nearest region within `min_width`: the regions are grown
+    into the slivers by small steps, so a long strip along several regions is divided
+    among them in proportion to where it touches each. The partition stays exact (no area
+    lost or counted twice). Parts of a sliver farther than `min_width` from any region
+    (for example the far end of a thin rib) stay regions of their own, marked "sliver"."""
+    slivers = [r for r in regions if r.stop_reason == "sliver"]
+    solid = [r for r in regions if r.stop_reason != "sliver"]
+    if not slivers or not solid:
+        return regions
+    remaining = _polygonal(unary_union([r.geom for r in slivers]))
+    step = min_width / 10.0
+    grown = {id(r): r.geom for r in solid}
+    claims = {id(r): [] for r in solid}
+    active = [r for r in solid if r.geom.distance(remaining) <= 1.2 * min_width]
+    for _ in range(12):
+        if remaining.is_empty or remaining.area < 1e-9:
+            break
+        for r in active:
+            got = _polygonal(grown[id(r)].buffer(step, quad_segs=4).intersection(remaining))
+            if got.is_empty or got.area < 1e-12:
+                continue
+            remaining = remaining.difference(got)
+            claims[id(r)].append(got)
+            grown[id(r)] = unary_union([grown[id(r)], got])
+
+    out: list[Region] = []
+    for r in regions:
+        if r.stop_reason == "sliver":
+            continue
+        if claims.get(id(r)):
+            # the claims share a boundary with the region that was computed by another
+            # route: close the hairline gaps (about 1e-12 mm) the union would leave
+            g = _polygonal(unary_union([r.geom] + claims[id(r)])
+                           .buffer(1e-6, join_style="mitre").buffer(-1e-6, join_style="mitre"))
+            if isinstance(g, MultiPolygon):  # keep the piece that holds the region
+                parts = list(g.geoms)
+                k = max(range(len(parts)),
+                        key=lambda j: parts[j].intersection(r.geom.buffer(1e-6)).area)
+                remaining = _polygonal(unary_union(
+                    [remaining] + parts[:k] + parts[k + 1:]))
+                g = parts[k]
+            m = polygon_moments(g)
+            ok = not violates(m, max_area, max_ar)
+            r = Region(g, m, r.depth, r.path, ok,
+                       "within thresholds" if ok else "exceeds thresholds after merging slivers",
+                       cell=None)
+        out.append(r)
+    depth = max(r.depth for r in slivers)
+    for q in getattr(remaining, "geoms", [remaining]):
+        if isinstance(q, Polygon) and q.area > 1e-6:
+            out.append(Region(q, polygon_moments(q), depth, "sliver", False, "sliver"))
+    return out
 
 
 def nsplit_regions(part, max_area: float, max_ar: float, max_pieces: int = 64):
@@ -326,10 +405,13 @@ def assign_angles(regions: list[Region], angles=(45.0, 135.0), extra_angle: floa
 
 def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bisect",
             min_area: float = 1.0, max_depth: int = 12, angles=(45.0, 135.0),
-            max_pieces: int = 64, extra_angle: float | None = None) -> SectioningResult:
+            max_pieces: int = 64, extra_angle: float | None = None,
+            min_width: float = 2.0) -> SectioningResult:
     part_m = polygon_moments(part)
     if mode == "bisect":
-        regions, cuts = bisect_regions(part, max_area, max_ar, min_area, max_depth)
+        regions, cuts = bisect_regions(part, max_area, max_ar, min_area, max_depth, min_width)
+        if min_width > 0:
+            regions = absorb_slivers(regions, min_width, max_area, max_ar)
     elif mode == "nsplit":
         regions, cuts = nsplit_regions(part, max_area, max_ar, max_pieces)
     else:

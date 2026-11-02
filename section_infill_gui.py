@@ -161,13 +161,15 @@ class App(tk.Tk):
         ttk.Separator(t1).grid(row=3, column=0, columnspan=4, sticky="we", pady=10)
         ttk.Label(t1, text="What to write (the JSON report is always written):").grid(
             row=4, column=0, columnspan=4, sticky="w")
-        self._check(t1, 5, "PNG image with the regions", "write_png")
-        self._check(t1, 6, "One STL file per region (modifiers)", "write_stl")
-        self._check(t1, 7, "Bambu Studio project (.3mf) with part and modifiers already set up",
+        self._check(t1, 5, "PNG image with the regions (clean: region numbers only)", "write_png")
+        self._check(t1, 6, "PNG image with details (angle, area, aspect ratio, ellipses)",
+                    "write_png_details")
+        self._check(t1, 7, "One STL file per region (modifiers)", "write_stl")
+        self._check(t1, 8, "Bambu Studio project (.3mf) with part and modifiers already set up",
                     "export_3mf")
         ttk.Label(t1, text="The STLs are also needed for the .3mf: they are written anyway "
                   "when the .3mf is ticked.", foreground="#666", wraplength=420).grid(
-            row=8, column=0, columnspan=4, sticky="w", pady=(2, 0))
+            row=9, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
         # ---- tab 2: sectioning -------------------------------------------
         self._row(t2, 0, "Maximum area [mm²]", "max_area", 10,
@@ -188,10 +190,12 @@ class App(tk.Tk):
         self._row(t2, 9, "Footprint", "footprint", 10, values=list(FOOTPRINTS),
                   hint="projection = shadow; section = cross-section at mid height")
         self._row(t2, 10, "Minimum area [mm²]", "min_area", 10, hint="safety stop")
-        self._row(t2, 11, "Maximum depth", "max_depth", 10)
-        self._row(t2, 12, "Modifier margin XY [mm]", "margin_xy", 10,
+        self._row(t2, 11, "Minimum region width [mm]", "min_width", 10,
+                  hint="narrower slivers are merged into the neighbours; 0 = off")
+        self._row(t2, 12, "Maximum depth", "max_depth", 10)
+        self._row(t2, 13, "Modifier margin XY [mm]", "margin_xy", 10,
                   hint="overhang beyond the outer walls")
-        self._row(t2, 13, "Modifier margin Z [mm]", "margin_z", 10, hint="overhang above the part")
+        self._row(t2, 14, "Modifier margin Z [mm]", "margin_z", 10, hint="overhang above the part")
 
         # ---- tab 3: Bambu Studio -------------------------------------------
         t3.columnconfigure(1, weight=1)

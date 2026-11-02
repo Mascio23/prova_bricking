@@ -26,6 +26,8 @@ usa questa tabella per ritrovarli nella finestra.
   Terzo angolo                      ->  Third angle
   Avanzate: Modalita', Sagoma       ->  Advanced: Mode, Footprint
   Area minima, Profondita' massima  ->  Minimum area, Maximum depth
+  Larghezza minima delle regioni    ->  Minimum region width
+  PNG con i dettagli                ->  PNG image with details
   Margine modifier XY, Z            ->  Modifier margin XY, Z
   Template                          ->  Template
   Imposta l'infill sparso           ->  Set the sparse infill
@@ -189,7 +191,12 @@ SCHEDA 1 - PEZZO E FILE
                       l'altezza.
   Cartella di output  Dove scrivere i file.
   Prefisso            Parte iniziale del nome dei file prodotti.
-  PNG                 Immagine con la sagoma e le regioni, colorate per angolo.
+  PNG                 Immagine "pulita": sagoma e regioni colorate per angolo, solo con i
+                      numeri delle regioni.
+  PNG con i dettagli  Una seconda immagine (<prefisso>_sections_details.png) che mostra
+                      anche, per ogni regione, angolo, area e aspect ratio, e le ellissi
+                      equivalenti. Con molte regioni le etichette delle piu' piccole
+                      possono sovrapporsi: i valori sono tutti nel file JSON.
   STL dei modifier    Un file STL per regione. Servono se vuoi importare i modifier a
                       mano in Bambu Studio. Con il .3mf spuntato vengono scritti comunque.
   Progetto .3mf       Il file pronto da aprire in Bambu Studio.
@@ -215,6 +222,14 @@ SCHEDA 2 - SEZIONAMENTO
   Sagoma              projection = ombra del pezzo sul piano XY (consigliato).
                       section = sezione a meta' altezza.
   Area minima         Blocco di sicurezza: sotto questa area non si divide piu'.
+  Larghezza minima    Predefinito 2 mm. Quando un taglio passa vicino a un bordo lascia
+  delle regioni       una striscia sottile; senza questo limite il programma la
+                      dimezzerebbe ancora e ancora, producendo decine di regioni minuscole.
+                      Un pezzo piu' stretto (larghezza media = 2 x area / perimetro) non
+                      viene diviso e viene unito alle regioni vicine, che se lo
+                      spartiscono. 2 mm sono circa due pareti per lato: un pezzo piu'
+                      stretto non contiene comunque infill. 0 = disattivato. Una regione
+                      che dopo l'unione supera di poco una soglia e' segnata "(!)".
   Profondita' massima Altro blocco di sicurezza sulle divisioni successive.
   Margine XY, Z       Di quanto i modifier sporgono oltre il pezzo (2 mm ai lati esterni,
                       1 mm sopra). Sui lati di taglio i modifier si toccano senza
@@ -512,7 +527,8 @@ Con prefisso "provino" nella cartella di output:
   provino.3mf                       Progetto per Bambu Studio (solo con .3mf spuntato)
   provino_sections.json             Report: parametri, aree, aspect ratio, angoli, poligoni,
                                     posizione sul piatto, avvisi
-  provino_sections.png              Immagine con le regioni colorate per angolo
+  provino_sections.png              Immagine pulita: regioni colorate per angolo, numeri
+  provino_sections_details.png      Come sopra, piu' angolo, area, aspect ratio, ellissi
   provino_modifier_00_45deg.stl     Un file per regione, nello stesso sistema di coordinate
   provino_modifier_01_135deg.stl    del pezzo. Il numero e' la regione, il suffisso e' il
   ...                               suo angolo rispetto al pezzo.

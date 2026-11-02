@@ -164,7 +164,10 @@ def _hatch_lines(geom, angle_deg, spacing):
 
 
 def write_png(result: SectioningResult, path: Path, title: str = "",
-              modifier_files=None, dpi: int = 200):
+              modifier_files=None, dpi: int = 200, details: bool = False):
+    """Preview of the sectioning. details=False: only the region numbers (clean);
+    details=True: also angle, area and aspect ratio of every region and the equivalent
+    ellipses."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -185,7 +188,9 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
 
     minx, miny, maxx, maxy = result.part.bounds
     w, h = maxx - minx, maxy - miny
-    fig_w = 10.0
+    n_reg = len(result.regions)
+    many = n_reg > 16
+    fig_w = min(22.0, 10.0 + 0.2 * n_reg) if (details and many) else 10.0
     fig_h = max(3.0, min(10.0, fig_w * (h + 0.3 * w) / max(w, 1e-9) * 0.9))
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     fig.patch.set_facecolor("#fcfcfb")
@@ -203,7 +208,6 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
                 ax.add_patch(patch(p, facecolor="none", edgecolor=MUTED, lw=0.6,
                                    ls=(0, (3, 2)), zorder=1))
 
-    many = len(result.regions) > 16  # too crowded for full labels and ellipses
     for r in result.regions:
         c = color_of[r.angle]
         for p in _polys(r.geom):
@@ -212,7 +216,7 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
         ax.add_collection(LineCollection(segs, colors=c, linewidths=0.9, zorder=3))
         for p in _polys(r.geom):
             ax.add_patch(patch(p, facecolor="none", edgecolor="#fcfcfb", lw=2.0, zorder=4))
-        if not many:  # equivalent ellipse of the region (dashed)
+        if details:  # equivalent ellipse of the region (dashed)
             a, b = r.moments.semi_axes
             ax.add_patch(Ellipse((r.moments.cx, r.moments.cy), 2 * a, 2 * b,
                                  angle=r.moments.major_axis_deg, fill=False,
@@ -220,9 +224,10 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
         rp = r.geom.representative_point() if not r.geom.contains(
             r.geom.centroid) else r.geom.centroid
         flag = "" if r.within_thresholds else " (!)"
-        label = (f"R{r.id}{flag}" if many else
-                 f"R{r.id}{flag}\n{r.angle:g}°\nA={r.area:.0f} mm²\nAR={r.aspect_ratio:.2f}")
-        ax.text(rp.x, rp.y, label, ha="center", va="center", fontsize=5 if many else 7,
+        label = (f"R{r.id}{flag}\n{r.angle:g}°\nA={r.area:.0f} mm²\nAR={r.aspect_ratio:.2f}"
+                 if details else f"R{r.id}{flag}")
+        ax.text(rp.x, rp.y, label, ha="center", va="center",
+                fontsize=(5 if many else 7) if details else (6 if many else 7),
                 color=INK, zorder=6,
                 bbox=dict(boxstyle="round,pad=0.15" if many else "round,pad=0.25",
                           fc="#fcfcfb", ec="none", alpha=0.85))
@@ -243,7 +248,7 @@ def write_png(result: SectioningResult, path: Path, title: str = "",
                                                if a in extra_angles else ""))
                for a in main_angles + extra_angles]
     handles += [Line2D([], [], color=INK, ls="--", lw=0.8, label="cut (minor axis)")]
-    if not many:
+    if details:
         handles.append(Line2D([], [], color=INK_2, ls=":", lw=0.8, label="equivalent ellipse"))
     if modifier_files:
         handles.append(Line2D([], [], color=MUTED, ls="--", lw=0.6, label="modifier outline"))

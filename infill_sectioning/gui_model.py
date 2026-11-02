@@ -28,6 +28,7 @@ class FormState:
     prefix: str = ""
     write_stl: bool = True
     write_png: bool = True
+    write_png_details: bool = True   # second PNG: angle, area, aspect ratio, ellipses
     export_3mf: bool = True
     # sectioning
     max_area: str = "900"
@@ -39,6 +40,7 @@ class FormState:
     mode: str = "bisect"
     footprint: str = "projection"
     min_area: str = "1"
+    min_width: str = "2"
     max_depth: str = "12"
     margin_xy: str = "2"
     margin_z: str = "1"
@@ -130,6 +132,7 @@ class FormState:
                 if e is not None and a is not None and abs(((e - a + 90) % 180) - 90) < 1e-6:
                     err.append(f"Third angle: coincides with {name}")
         number("Minimum area", self.min_area, 0)
+        number("Minimum region width", self.min_width, 0)
         number("Maximum depth", self.max_depth, 1, integer=True)
         number("Modifier margin XY", self.margin_xy, 0)
         number("Modifier margin Z", self.margin_z, 0)
@@ -172,18 +175,21 @@ class FormState:
             argv += ["--extra-angle", t(self.extra_angle)]
         defaults = FormState()
         for flag, name in (("--mode", "mode"), ("--footprint", "footprint"),
-                           ("--min-area", "min_area"), ("--max-depth", "max_depth"),
+                           ("--min-area", "min_area"), ("--min-width", "min_width"),
+                           ("--max-depth", "max_depth"),
                            ("--margin-xy", "margin_xy"), ("--margin-z", "margin_z"),
                            ("--step-tolerance", "step_tolerance"),
                            ("--raster-pixel", "raster_pixel")):
             if t(getattr(self, name)) != t(getattr(defaults, name)):
                 argv += [flag, t(getattr(self, name))]
         if preview_dir:
-            return argv + ["--no-stl", "--png-dpi", "110"]
+            return argv + ["--no-stl", "--no-png-details", "--png-dpi", "110"]
         if t(self.png_dpi) != t(defaults.png_dpi):
             argv += ["--png-dpi", t(self.png_dpi)]
         if not self.write_png:
             argv.append("--no-png")
+        elif not self.write_png_details:
+            argv.append("--no-png-details")
         if not self.write_stl and not self.export_3mf:
             argv.append("--no-stl")
         if self.export_3mf:
