@@ -313,7 +313,31 @@ def test_plate_fit_warning():
     vols = [Volume("p.stl", box, "normal_part")]
     assert plate_fit_warning(vols, t, 0.0) is None
     assert "beyond the printable area" in plate_fit_warning(vols, t, 90.0)
-    assert plate_fit_warning(vols, None, 90.0) is None
+    # without a template the default plate (350 x 320 mm) is assumed
+    assert plate_fit_warning(vols, None, 0.0) is None
+    assert "assumed" in plate_fit_warning(vols, None, 90.0)
+
+
+def test_plate_fit_warning_needs_no_rotation():
+    from infill_sectioning.bambu3mf import Volume, plate_fit_warning
+    t = read_template(REF)
+    too_big = [Volume("p.stl", trimesh.creation.box(extents=[400, 400, 4]), "normal_part")]
+    msg = plate_fit_warning(too_big, t, 0.0)
+    assert "the part extends beyond the printable area (350 x 320 mm)" in msg
+    assert "assumed" not in msg
+    assert plate_fit_warning(too_big, None, 0.0) is not None
+    # a part that fits is not reported, also when a modifier overhangs the plate
+    ok = [Volume("p.stl", trimesh.creation.box(extents=[340, 300, 4]), "normal_part"),
+          Volume("m.stl", trimesh.creation.box(extents=[360, 320, 5]), "modifier_part")]
+    assert plate_fit_warning(ok, t, 0.0) is None
+
+
+def test_cli_warns_when_the_part_is_larger_than_the_plate(tmp_path, capsys):
+    trimesh.creation.box(extents=[400, 400, 4]).export(tmp_path / "big.stl")
+    section_infill.main([str(tmp_path / "big.stl"), "--out-dir", str(tmp_path / "o"),
+                         "--export-3mf", "--template-3mf", str(REF), "--no-png", "--no-stl",
+                         "--max-area", "40000"])
+    assert "extends beyond the printable area" in capsys.readouterr().out
 
 
 def test_inherit_infill_writes_only_the_direction(tmp_path):

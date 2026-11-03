@@ -464,6 +464,24 @@ Bambu Studio resta in caricamento quando apro il .3mf
   alza area massima o aspect ratio, oppure semplifica la mesh. Se si blocca, chiudi da
   Gestione attivita' e mandami il file.
 
+Avviso "the part extends beyond the printable area"
+  Il pezzo (ruotato o no) esce dal piatto del template: riducilo, ruotalo, dividilo, o
+  controlla che il template sia quello della tua stampante. Senza --template-3mf si
+  assume il piatto H2D 350 x 320 mm.
+
+Avviso "the part is only ... mm" oppure "... mm: the model may be in micrometres"
+  Il modello e' probabilmente in pollici, metri o micrometri: scalalo in millimetri e
+  riesportalo.
+
+"error: ..." e nient'altro
+  Il programma si e' fermato apposta, prima di scrivere file: file mancante o non valido,
+  modello senza altezza o solo con pareti verticali, valore impossibile (--max-area 0,
+  --max-ar 0.5). Leggi il messaggio e correggi.
+
+"region(s) [n] are thinner than --min-width"
+  Nervatura piu' sottile di 2 mm: non contiene infill (solo pareti), quindi il suo angolo
+  non ha effetto. Non c'e' nulla da correggere.
+
 Il piatto e' piu' grande del pezzo (104 x 24 invece di 100 x 20)
   I modifier sono stati stampati come parti solide. Con il progetto .3mf automatico non
   succede; con l'import manuale ricorda "Change type -> Modifier" per ogni modifier.

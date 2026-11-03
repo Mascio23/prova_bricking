@@ -225,6 +225,55 @@ def absorb_slivers(regions: list[Region], min_width: float, max_area: float, max
     return out
 
 
+def _shared_length(a, b, tol: float = 1e-4) -> float:
+    if a.distance(b) > tol:
+        return 0.0
+    return a.boundary.intersection(b.buffer(tol)).length
+
+
+def merge_dust(regions: list[Region], min_width: float, max_area: float, max_ar: float):
+    """Merge the leftover fragments into a neighbour, however short their contact is.
+
+    After `absorb_slivers` a cut that grazes a thin rib can leave fragments of a few
+    hundredths of a mm^2: they are smaller than a square of side `min_width`, so they hold
+    no infill, yet each would get its own modifier. Every such fragment (a "sliver" region
+    with area < min_width^2) is united with the neighbour it shares the longest boundary
+    with. The partition stays exact. A fragment that touches nothing (an island) stays."""
+    dust_area = min_width ** 2
+    regions = list(regions)
+    skipped: set[int] = set()
+    while True:
+        cand = [r for r in regions if r.stop_reason == "sliver" and r.area < dust_area
+                and id(r) not in skipped]
+        if not cand:
+            return regions
+        d = min(cand, key=lambda r: r.area)
+        best, best_len = None, 1e-6
+        for r in regions:
+            if r is d:
+                continue
+            length = _shared_length(d.geom, r.geom)
+            if length > best_len:
+                best, best_len = r, length
+        if best is None:
+            skipped.add(id(d))
+            continue
+        g = _polygonal(unary_union([best.geom, d.geom])
+                       .buffer(1e-6, join_style="mitre").buffer(-1e-6, join_style="mitre"))
+        if not isinstance(g, Polygon):  # would not stay one piece: leave it alone
+            skipped.add(id(d))
+            continue
+        m = polygon_moments(g)
+        if best.stop_reason == "sliver":
+            merged = Region(g, m, best.depth, best.path, False, "sliver", cell=None)
+        else:
+            ok = not violates(m, max_area, max_ar)
+            merged = Region(g, m, best.depth, best.path, ok,
+                            "within thresholds" if ok else "exceeds thresholds after merging slivers",
+                            cell=None)
+        regions = [merged if r is best else r for r in regions if r is not d]
+
+
 def nsplit_regions(part, max_area: float, max_ar: float, max_pieces: int = 64):
     """EXPERIMENTAL: N equal-width slabs along the global major axis."""
     sliver = 1e-9 * part.area
@@ -444,6 +493,7 @@ def section(part, max_area: float = 900.0, max_ar: float = 2.0, mode: str = "bis
         regions, cuts = bisect_regions(part, max_area, max_ar, min_area, max_depth, min_width)
         if min_width > 0:
             regions = absorb_slivers(regions, min_width, max_area, max_ar)
+            regions = merge_dust(regions, min_width, max_area, max_ar)
     elif mode == "nsplit":
         regions, cuts = nsplit_regions(part, max_area, max_ar, max_pieces)
     else:

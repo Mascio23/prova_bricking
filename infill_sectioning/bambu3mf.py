@@ -239,19 +239,27 @@ def placement(volumes: list[Volume], template: Template | None = None,
 
 def plate_fit_warning(volumes: list[Volume], template: Template | None,
                       rotation_deg: float = 0.0) -> str | None:
-    """Warn if the rotated part (not the modifiers) leaves the printable area."""
-    if template is None or template.plate_bounds is None:
-        return None
-    pl = placement(volumes, template, rotation_deg)
+    """Warn if the (rotated) part, not the modifiers, leaves the printable area.
+
+    Without a template the plate is assumed to be the default one (the H2D, 350 x 320 mm,
+    centred on DEFAULT_PLATE_CENTER)."""
+    t = template or Template()
+    assumed = t.plate_bounds is None
+    x0, y0, x1, y1 = t.plate_bounds or (0.0, 0.0, 2 * t.plate_center[0], 2 * t.plate_center[1])
+    pl = placement(volumes, t, rotation_deg)
     o, pos = np.array(pl["object_origin_xy"]), np.array(pl["plate_position_xy"])
     parts = [v for v in volumes if v.subtype == "normal_part"]
     pts = np.concatenate([v.mesh.vertices[:, :2] for v in parts])
     q = (pts - o) @ _rot2(rotation_deg).T + pos
-    x0, y0, x1, y1 = template.plate_bounds
-    if q[:, 0].min() < x0 or q[:, 0].max() > x1 or q[:, 1].min() < y0 or q[:, 1].max() > y1:
-        return (f"the part rotated by {rotation_deg:g} deg extends beyond the printable area "
-                f"({x1 - x0:g} x {y1 - y0:g} mm): x {q[:, 0].min():.1f}..{q[:, 0].max():.1f}, "
-                f"y {q[:, 1].min():.1f}..{q[:, 1].max():.1f}")
+    eps = 1e-6
+    if (q[:, 0].min() < x0 - eps or q[:, 0].max() > x1 + eps
+            or q[:, 1].min() < y0 - eps or q[:, 1].max() > y1 + eps):
+        what = f"the part rotated by {rotation_deg:g} deg" if rotation_deg else "the part"
+        plate = f"{x1 - x0:g} x {y1 - y0:g} mm" + (", assumed: no --template-3mf" if assumed else "")
+        return (f"{what} extends beyond the printable area ({plate}): "
+                f"x {q[:, 0].min():.1f}..{q[:, 0].max():.1f}, "
+                f"y {q[:, 1].min():.1f}..{q[:, 1].max():.1f}. Bambu Studio will not slice it "
+                "there: scale it, rotate it or split it")
     return None
 
 

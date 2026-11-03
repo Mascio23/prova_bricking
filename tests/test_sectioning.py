@@ -473,6 +473,44 @@ def test_an_isolated_thin_rib_stays_a_region_flagged_as_sliver():
     assert len(section(part, 900, 2.0, min_width=0.0).regions) > len(res.regions)
 
 
+def plate_with_a_thin_rib():
+    """60 x 60 plate with a 0.8 x 150 mm rib: the cuts through the plate used to leave nine
+    fragments of 0.006-0.02 mm2 along the rib, each one with its own modifier."""
+    return unary_union([box(0, 0, 60, 60), box(60, 29.6, 210, 30.4)])
+
+
+def test_a_thin_rib_leaves_no_dust_regions():
+    part = plate_with_a_thin_rib()
+    res = section(part, 900, 2.0, extra_angle=90.0)
+    assert min(r.area for r in res.regions if r.stop_reason == "sliver") > 2.0 ** 2
+    assert len([r for r in res.regions if r.stop_reason == "sliver"]) == 1  # the rib itself
+    assert len(res.regions) <= 14
+    cov = coverage_error(res)  # exact partition (the rib itself is flagged, so no check_partition)
+    assert cov["uncovered_area"] < 1e-6 * cov["part_area"]
+    assert cov["overlap_area"] < 1e-6 * cov["part_area"]
+    mods = modifier_footprints(res, margin=2.0)
+    assert res.part.difference(unary_union(mods)).area < 1e-4 * res.part.area
+
+
+def test_dust_is_merged_even_when_the_contact_is_shorter_than_min_contact():
+    from infill_sectioning.sectioning import Region, merge_dust
+    big = box(0, 0, 20, 20)
+    dust = box(20, 0, 20.5, 0.4)  # 0.4 mm of shared edge, 0.2 mm2
+    mk = lambda g, reason, ok: Region(g, polygon_moments(g), 1, "x", ok, reason)
+    out = merge_dust([mk(big, "within thresholds", True), mk(dust, "sliver", False)],
+                     2.0, 900, 2.0)
+    assert len(out) == 1
+    assert out[0].geom.area == pytest.approx(400.2) and out[0].geom.geom_type == "Polygon"
+
+
+def test_dust_that_touches_nothing_is_left_alone():
+    from infill_sectioning.sectioning import Region, merge_dust
+    mk = lambda g, reason, ok: Region(g, polygon_moments(g), 1, "x", ok, reason)
+    out = merge_dust([mk(box(0, 0, 20, 20), "within thresholds", True),
+                      mk(box(50, 0, 50.5, 0.4), "sliver", False)], 2.0, 900, 2.0)
+    assert len(out) == 2
+
+
 def test_cli_writes_the_clean_and_the_detailed_png(tmp_path):
     mesh = trimesh.creation.extrude_polygon(t_shape(), height=4.0)
     mesh.export(tmp_path / "t.stl")

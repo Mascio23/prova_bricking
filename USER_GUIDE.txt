@@ -292,7 +292,8 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
      - DO NOT rotate the part by hand in Bambu Studio after opening the project: the
        modifiers would rotate with the part but the written angles would not, and the
        compensation is lost. Regenerate the project with another rotation.
-     - The program warns if the rotated part leaves the printable area of the template.
+     - The program warns if the part (rotated or not) leaves the printable area of the
+       template (without a template it assumes the default 350 x 320 mm plate).
      - I could not verify in Bambu Studio the direction of the "Rotation Z" field in the
        interface (the program writes a counter-clockwise rotation, as in the thumbnail):
        check on your screen that the part is rotated in the expected direction.
@@ -471,9 +472,23 @@ A warning about a pattern appears
   Shape with T-junctions: use the third angle (recipe 5.5). If it says "Three angles are
   not enough", add the fourth: --extra-angle 90 0.
 
-The program says the rotated part leaves the printable area
-  Reduce the rotation, use a smaller part, or check that the template is the one of your
-  printer (the area is read from the template).
+The program says the part extends beyond the printable area
+  Reduce the rotation, scale the part or split it, or check that the template is the one
+  of your printer (the area is read from the template; without --template-3mf the 350 x
+  320 mm of the H2D is assumed).
+
+"WARNING: the part is only ... mm" / "... mm: the model may be in micrometres"
+  The model is probably in inches, metres or micrometres: scale it to millimetres in your
+  CAD or slicer and export it again. The sectioning needs about 2 mm per region.
+
+"error: ..." with no other text
+  The program stopped on purpose, before writing anything: missing file, file that is not
+  a mesh, a model with no height or only vertical walls, or an impossible value such as
+  --max-area 0 or --max-ar 0.5. Read the message and fix that.
+
+"region(s) [n] are thinner than --min-width"
+  A rib thinner than 2 mm: there is no infill in it (only walls), so its angle has no
+  effect. Nothing to fix; thicken the rib if it should be sectioned.
 
 Error reading a STEP file
   python -m pip install cadquery-ocp. Alternatively export the part as STL.

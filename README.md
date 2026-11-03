@@ -225,8 +225,20 @@ The procedure is repeated on both halves.
   narrower piece contains no infill anyway. The same plate gives 34 regions, none out of
   threshold. A merged region can exceed a threshold slightly: it is then flagged "(!)".
   A thin part that cannot be merged (the far end of a thin rib) stays a region of its
-  own, flagged `sliver`. `--min-width 0` restores the old behaviour. This is an
+  own, flagged `sliver`. `--min-width 0` restores the old behaviour. Fragments left by a
+  cut that grazes a thin rib (a "sliver" smaller than a square of side `--min-width`) are
+  merged into the neighbour they share the longest boundary with, however short that
+  contact is, so they never get a modifier of their own (a 0.8 mm rib used to give nine
+  fragments of 0.01 mm²). A rib that is itself thinner than `--min-width` stays one
+  region and the program says so: it holds no infill, its angle has no effect. This is an
   addition of this program, not a step of the method of Shen et al.
+
+**Input checks.** Before doing any work the program rejects impossible values
+(`--max-area` ≤ 0, `--max-ar` < 1, negative widths/contacts) and unusable models (missing
+file, not a mesh, empty, only vertical walls, zero height) with a one-line `error: …`.
+It warns, and goes on, about a part smaller than 10 mm (probably inches or metres), larger
+than 1000 mm (probably micrometres), or a mesh that is not watertight. The warnings are
+also stored in the JSON (`warnings`).
 
 **Angles.**
 - Two regions are neighbours if they share a stretch of boundary (> 0.01 mm). Touching
@@ -431,8 +443,8 @@ In the `.3mf` the part and the modifiers are rotated by 42.4° about the vertica
 `infill_direction = relative angle + rotation`, for example 45° → 87.4° and
 135° → 177.4° (modulo 180°). The program prints the conversion table, and in the JSON
 each region has `infill_angle_deg` (relative to the part) and `plate_angle_deg` (on the
-plate). If the rotated part leaves the printable area of the template, there is a
-warning.
+plate). If the part (rotated or not) leaves the printable area of the template, there is
+a warning; without a template the default 350 × 320 mm plate is assumed.
 
 To choose the rotation: 0° = long side along X; 90° = along Y; for the diagonal of the
 H2D (350 × 320 mm) the angle is `atan(320/350) ≈ 42.4°`.

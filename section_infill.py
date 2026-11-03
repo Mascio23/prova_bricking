@@ -105,14 +105,72 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
+def check_args(args):
+    """Reject impossible parameter values before doing any work."""
+    problems = []
+    if not args.max_area > 0:
+        problems.append("--max-area must be greater than 0")
+    if not args.max_ar >= 1:
+        problems.append("--max-ar must be at least 1 (an aspect ratio is never below 1)")
+    for flag, value in (("--min-width", args.min_width), ("--min-contact", args.min_contact),
+                        ("--min-area", args.min_area), ("--margin-xy", args.margin_xy),
+                        ("--margin-z", args.margin_z)):
+        if value < 0:
+            problems.append(f"{flag} cannot be negative")
+    if args.max_depth < 1:
+        problems.append("--max-depth must be at least 1")
+    if problems:
+        raise SystemExit("error: " + "; ".join(problems))
+
+
+def load_checked(args):
+    """Load the model and the footprint; turn every failure into a plain message.
+
+    Returns (mesh, part, warnings): the warnings are about input that is valid but
+    suspicious (wrong units, open mesh)."""
+    path = args.model
+    if not path.is_file():
+        raise SystemExit(f"error: model file not found: {path}")
+    try:
+        mesh = load_mesh(path, step_tolerance=args.step_tolerance)
+        part = extract_footprint(mesh, args.footprint)
+    except ImportError as exc:
+        raise SystemExit(f"error: {exc}")
+    except (ValueError, OSError, IndexError) as exc:
+        raise SystemExit(f"error: cannot use {path.name} as a model: {exc}")
+    if part.is_empty or part.area < 1e-6:
+        raise SystemExit(f"error: {path.name} has no footprint area in the XY plane (a "
+                         "single wall or an empty mesh?)")
+    z_min, z_max = float(mesh.bounds[0, 2]), float(mesh.bounds[1, 2])
+    if z_max - z_min < 1e-3:
+        raise SystemExit(f"error: {path.name} is flat (height {z_max - z_min:g} mm): it "
+                         "cannot be printed or sectioned")
+    warnings = []
+    x0, y0, x1, y1 = part.bounds
+    w, h = x1 - x0, y1 - y0
+    if max(w, h) < 10:
+        warnings.append(f"the part is only {w:.2f} x {h:.2f} mm: if the model is in inches or "
+                        "metres, scale it to millimetres first (sectioning needs about 2 mm "
+                        "per region at least)")
+    elif max(w, h) > 1000:
+        warnings.append(f"the part is {w:.0f} x {h:.0f} mm: the model may be in micrometres "
+                        "or inches-to-mm twice; the build plate is only a few hundred mm")
+    if path.suffix.lower() not in (".step", ".stp") and not mesh.is_watertight:
+        warnings.append("the mesh is not watertight (holes or loose edges): the footprint "
+                        "was computed anyway, but Bambu Studio may repair or reject the part")
+    return mesh, part, warnings
+
+
 def run(args) -> dict:
+    check_args(args)
     if args.export_3mf and not args.inherit_infill:  # fail early on a typo
         try:
             infill_settings(args.infill_density, args.infill_pattern)
         except ValueError as exc:
             raise SystemExit(f"error: {exc}")
-    mesh = load_mesh(args.model, step_tolerance=args.step_tolerance)
-    part = extract_footprint(mesh, args.footprint)
+    mesh, part, input_warnings = load_checked(args)
+    for w in input_warnings:
+        print("WARNING:", w)
     z_min, z_max = float(mesh.bounds[0, 2]), float(mesh.bounds[1, 2])
 
     moments_check = None
@@ -159,6 +217,7 @@ def run(args) -> dict:
         "z_range_mm": [round(z_min, 4), round(z_max, 4)],
     }
     report = build_report(result, params, input_info, mod_files, moments_check)
+    report["warnings"] = list(input_warnings)
     for entry, r in zip(report["regions"], result.regions):
         entry["plate_angle_deg"] = plate_angle(r.angle, args.plate_rotation)
     report["parameters"]["plate_rotation_deg"] = args.plate_rotation
@@ -223,9 +282,9 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         print(f"3mf: part rotated by {theta:g} deg on the plate; infill_direction on the plate = "
               "angle relative to the part + rotation: " + ", ".join(
                   f"R{r.id} {r.angle:g}->{plate_angle(r.angle, theta):g}" for r in result.regions))
-        fit = plate_fit_warning(volumes, template, theta)
-        if fit:
-            print("WARNING:", fit)
+    fit = plate_fit_warning(volumes, template, theta)
+    if fit:
+        print("WARNING:", fit)
     n_tri = sum(len(v.mesh.faces) for v in volumes)
     print(f"3mf: 1 part + {len(volumes) - 1} modifiers, {n_tri} triangles -> {path}")
     if len(volumes) - 1 > 32 or n_tri > 300_000:
@@ -282,6 +341,10 @@ def main(argv=None) -> int:
         else:
             print("  Even four angles did not resolve it within the search limit: raise "
                   "--min-contact to ignore short contacts.")
+    thin = [r["id"] for r in report["regions"] if r["stop_reason"] == "sliver"]
+    if thin:
+        print(f"NOTE: region(s) {thin} are thinner than --min-width ({args.min_width:g} mm): "
+              "they hold no infill (walls only), so their angle has no effect. Flagged (!)")
     if report["parameters"]["mode"] == "nsplit":
         print("NOTE: nsplit is EXPERIMENTAL and is not the method of Shen et al.")
     print(f"output written to {args.out_dir}")
