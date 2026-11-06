@@ -523,6 +523,22 @@ def coverage_error(result: SectioningResult) -> dict:
     }
 
 
+def clean_outline(geom, tol: float = 0.005):
+    """Drop the redundant vertices of an outline (collinear points on the cuts, the tiny
+    arcs left by growing slivers): at most `tol` mm of shift, far below what a 0.4 mm
+    nozzle can print, but meshes with thousands of near-duplicate vertices and zero-area
+    triangles are what makes slicers slow or unstable."""
+    # zero-width spikes (a vertex beyond the line of its neighbours) become zero-area
+    # triangles; a morphological opening of `tol` removes them, and the hairline wedges a few
+    # micrometres wide that a union can leave (mitre joins keep the corners)
+    g = geom.buffer(-tol, join_style="mitre").buffer(tol, join_style="mitre")
+    g = g.simplify(tol, preserve_topology=True)
+    if not g.is_valid:
+        g = g.buffer(0)
+    polys = _components(g, 1e-9 * max(geom.area, 1.0))
+    return MultiPolygon(polys) if len(polys) > 1 else polys[0]
+
+
 def modifier_footprints(result: SectioningResult, margin: float = 2.0):
     """XY outline of each modifier: the region grown by ``margin`` on its
     outer (free) sides only.
@@ -544,5 +560,6 @@ def modifier_footprints(result: SectioningResult, margin: float = 2.0):
         polys = _components(g, 1e-9 * r.area)
         # keep only pieces attached to the region itself (drop far islands)
         polys = [p for p in polys if p.intersects(r.geom)]
-        out.append(MultiPolygon(polys) if len(polys) > 1 else polys[0])
+        g = MultiPolygon(polys) if len(polys) > 1 else polys[0]
+        out.append(clean_outline(g))
     return out

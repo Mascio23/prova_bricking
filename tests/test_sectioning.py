@@ -511,6 +511,47 @@ def test_dust_that_touches_nothing_is_left_alone():
     assert len(out) == 2
 
 
+def clean_meshes(part, **kw):
+    from infill_sectioning.export import extrude
+    res = section(part, 900, 2.0, extra_angle=[90.0, 0.0], **kw)
+    out = []
+    for fp in modifier_footprints(res, margin=2.0):
+        out.append(extrude(fp, 0.0, 5.0))
+    return res, out
+
+
+@pytest.mark.parametrize("part", [
+    plate_with_windows_close_to_a_cut(),
+    plate_with_a_thin_rib(),
+    box(0, 0, 200, 200).difference(unary_union(
+        [Point(x, y).buffer(4, quad_segs=16) for x in range(15, 200, 25)
+         for y in range(15, 200, 25)])),
+    Point(0, 0).buffer(60, quad_segs=32).difference(Point(0, 0).buffer(50, quad_segs=32)),
+], ids=["windows", "thin_rib", "perforated", "ring"])
+def test_every_modifier_mesh_is_closed_and_free_of_degenerate_triangles(part):
+    """Open meshes, zero-area triangles and thousands of micro-vertices make Bambu Studio
+    slow or unresponsive: a real plate used to give 14 open modifiers out of 34."""
+    res, meshes = clean_meshes(part)
+    for r, m in zip(res.regions, meshes):
+        assert m.is_watertight and m.is_winding_consistent and m.volume > 0, r.id
+        assert m.area_faces.min() > 1e-6, r.id
+        assert len(m.faces) < 800, (r.id, len(m.faces))  # was > 2300 for a merged sliver
+    mods = modifier_footprints(res, margin=2.0)
+    assert res.part.difference(unary_union(mods)).area < 1e-4 * res.part.area
+
+
+def test_clean_outline_removes_spikes_and_redundant_vertices():
+    from infill_sectioning.sectioning import clean_outline
+    # square with a zero-width spike, collinear points on every side and a tiny arc
+    pts = [(0, 0), (5, 0), (10, 0), (10, 5), (10, 10), (30, 10), (10, 10), (5, 10), (0, 10)]
+    g = clean_outline(Polygon(pts))
+    assert g.geom_type == "Polygon" and g.is_valid
+    assert g.area == pytest.approx(100.0, abs=0.01)
+    assert len(g.exterior.coords) - 1 == 4
+    arc = Point(0, 0).buffer(5, quad_segs=200)  # 800 vertices, sagitta far below 5 um
+    assert len(clean_outline(arc).exterior.coords) < 400
+
+
 def test_cli_writes_the_clean_and_the_detailed_png(tmp_path):
     mesh = trimesh.creation.extrude_polygon(t_shape(), height=4.0)
     mesh.export(tmp_path / "t.stl")

@@ -240,6 +240,14 @@ It warns, and goes on, about a part smaller than 10 mm (probably inches or metre
 than 1000 mm (probably micrometres), or a mesh that is not watertight. The warnings are
 also stored in the JSON (`warnings`).
 
+**Clean modifier meshes.** The outline of every modifier is cleaned before it is extruded
+(redundant vertices, zero-width spikes and the micro-arcs left by merging slivers are
+removed, at most 5 µm of shift), so every modifier STL is a closed mesh without
+zero-area triangles. A real plate used to give 14 open modifiers out of 34 and two
+modifiers of 2300 triangles each; now none are open and the project has a third of the
+triangles. Open or very heavy meshes are a likely cause of Bambu Studio freezing when it
+opens the `.3mf`.
+
 **Angles.**
 - Two regions are neighbours if they share a stretch of boundary (> 0.01 mm). Touching
   at a single point does not count.

@@ -49,7 +49,12 @@ def extrude(geom, z0: float, z1: float) -> trimesh.Trimesh:
         m = trimesh.creation.extrude_polygon(p, height=z1 - z0)
         m.apply_translation([0, 0, z0])
         parts.append(m)
-    return trimesh.util.concatenate(parts)
+    mesh = trimesh.util.concatenate(parts)
+    # no duplicate vertices (do NOT drop zero-area triangles: they can be needed to keep the
+    # mesh closed; clean_outline already keeps the outlines free of them)
+    mesh.merge_vertices()
+    mesh.remove_unreferenced_vertices()
+    return mesh
 
 
 def write_modifier_stls(result: SectioningResult, out_dir: Path, z_min: float,
