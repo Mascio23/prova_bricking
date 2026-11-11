@@ -47,7 +47,8 @@ from tkinter import filedialog, messagebox, ttk  # noqa: E402
 
 import section_infill  # noqa: E402
 from infill_sectioning.bambu3mf import pattern_names  # noqa: E402
-from infill_sectioning.gui_model import FOOTPRINTS, MODES, FormState  # noqa: E402
+from infill_sectioning.gui_model import (CENTRAL_CHOICES, FOOTPRINTS, MODES,  # noqa: E402
+                                         FormState)
 
 LAST_STATE = Path.home() / ".infill_sectioning_gui.json"
 PREVIEW_WIDTH = 620  # only used if Pillow is missing (it comes with matplotlib)
@@ -215,7 +216,8 @@ class App(tk.Tk):
         self._check(t3, 3, "Set the sparse infill in every modifier (otherwise the "
                     "template's stays)", "set_infill")
         self.density_entry = self._row(t3, 4, "   Density [%]", "density", 8,
-                                       hint="100 = solid. The solid layers stay alternated")
+                                       hint="100 = solid. The solid layers stay alternated. With "
+                                            "\"only top and bottom\" below: the infill of the middle")
         self.pattern_entry = self._row(t3, 5, "   Pattern", "pattern", 20, values=pattern_names(),
                                        hint="rectilinear = verified on the G-code")
         self.disable_when += [("set_infill", self.density_entry),
@@ -225,12 +227,31 @@ class App(tk.Tk):
         self.rot_entry = self._row(t3, 7, "   Rotation [°]", "rotation", 8,
                                    hint="counter-clockwise; H2D diagonal ≈ 42.4")
         self.disable_when.append(("use_rotation", self.rot_entry))
+        ttk.Separator(t3).grid(row=8, column=0, columnspan=4, sticky="we", pady=8)
+        self._check(t3, 9, "Modifiers only on the top and bottom layers (the middle keeps a "
+                    "continuous infill)", "use_shell_modifiers")
+        self.bottom_entry = self._row(t3, 10, "   Bottom layers", "bottom_layers", 8,
+                                      hint="solid layers at the bottom; the modifier is this many layers tall")
+        self.top_entry = self._row(t3, 11, "   Top layers", "top_layers", 8,
+                                   hint="solid layers at the top; the modifier is this many layers tall")
+        self.lh_entry = self._row(t3, 12, "   Layer height [mm]", "layer_height", 8,
+                                  hint="empty = the template's (else 0.2). Must be the one you slice with")
+        self.flh_entry = self._row(t3, 13, "   First layer height [mm]", "first_layer_height", 8,
+                                   hint="empty = the template's (else the layer height)")
+        self.central_entry = self._row(t3, 14, "   Central modifier", "central_modifier", 8,
+                                       values=list(CENTRAL_CHOICES),
+                                       hint="auto = yes for a plain extrusion, no if the part has "
+                                            "steps or pockets inside. Its density and pattern are "
+                                            "the ones above")
+        self.disable_when += [("use_shell_modifiers", w) for w in (
+            self.bottom_entry, self.top_entry, self.lh_entry, self.flh_entry,
+            self.central_entry)]
         ttk.Label(t3, text="Other modifier settings, one per line (KEY=VALUE):"
-                  ).grid(row=8, column=0, columnspan=4, sticky="w", pady=(10, 2))
-        self.settings_text = tk.Text(t3, height=5, width=44)
-        self.settings_text.grid(row=9, column=0, columnspan=4, sticky="we")
+                  ).grid(row=15, column=0, columnspan=4, sticky="w", pady=(10, 2))
+        self.settings_text = tk.Text(t3, height=4, width=44)
+        self.settings_text.grid(row=16, column=0, columnspan=4, sticky="we")
         ttk.Label(t3, text="for example  top_shell_layers=7   (they override the other options)",
-                  foreground="#666").grid(row=10, column=0, columnspan=4, sticky="w")
+                  foreground="#666").grid(row=17, column=0, columnspan=4, sticky="w")
         self.bambu_widgets = [self.tpl_entry, self.density_entry, self.pattern_entry,
                               self.rot_entry, self.settings_text]
 

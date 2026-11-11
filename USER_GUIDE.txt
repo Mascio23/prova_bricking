@@ -231,6 +231,11 @@ TAB 3 - BAMBU STUDIO PROJECT
   Rotate the part     Places the part tilted on the plate by these degrees
   on the plate        (counter-clockwise seen from above) and corrects the angles so that
                       relative to the part they stay 45 and 135. See recipe 5.3.
+  Modifiers only on   Limits the region modifiers to the bottom and top solid layers and
+  the top and bottom  leaves the middle of the part to one modifier with no top/bottom
+  layers             layers: the sparse infill (grid, 15%...) is then continuous. See
+                      recipe 5.7. Fields: Bottom layers, Top layers, Layer height and First
+                      layer height (empty = those of the template), Central modifier.
   Other modifier      One per line, in the form KEY=VALUE, applied to all modifiers.
   settings            Example: top_shell_layers=7. They override the other options. The
                       keys are Bambu Studio configuration keys.
@@ -322,6 +327,30 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
      corners and are ignored; three angles then suffice, with 15 regions). The weaker
      alternation (45 degrees between a region and its neighbours) must be declared in the
      thesis.
+
+5.7  CONTINUOUS SPARSE INFILL (MODIFIERS ONLY ON THE TOP AND BOTTOM LAYERS)
+     With an infill below 100% each region has its own infill and the lines of one
+     region do not join those of the next. To keep it continuous: tick "Modifiers only on
+     the top and bottom layers" (tab 3), write the number of Bottom layers and Top layers
+     (the same as in your template, for example 3 and 5) and, if you want, the layer
+     height you slice with (empty = the template's). Set Density and Pattern for the
+     middle of the part (for example 15 and grid: the middle is not sectioned, so Grid is
+     fine there). Command line: --bottom-layers 3 --top-layers 5.
+     What happens: each region gets a modifier only on the first 3 and the last 5
+     layers (alternated 45/135, solid layers); the middle of the part gets one modifier
+     with no top/bottom layers and the infill you chose, in one piece.
+     - SLICE WITH THE SAME LAYER HEIGHT: the heights of the modifiers are computed from it.
+       The program prints the heights and the layers it expects (for example "150 layers").
+     - Central modifier "auto": written only if the part is a plain extrusion. If the part
+       has a step or a pocket inside (the light-button cover has a step at z = 20) it is
+       NOT written: a horizontal surface in the middle would otherwise get no solid
+       layers. The middle then keeps the template's settings, so use blocks at least as
+       thick as the template's shell (the program warns if not).
+     - In the middle the infill has the global direction (no alternation, by design).
+       analyze_gcode.py checks only the first and the last layers.
+     - NOT YET VERIFIED IN A PRINT: it was designed from the Bambu Studio source and
+       checked with tests; look at the preview (layers 4 to N-5 must be sparse) and at the
+       G-code before printing.
 
 5.6  LEAVING THE INFILL AS IN THE TEMPLATE
      Untick "Set the sparse infill": the modifiers receive only the direction.
@@ -424,6 +453,9 @@ NOT VERIFIED
     direction of the rotation is consistent with the 3MF format and with the Bambu Studio
     sources, but I have not seen it in Bambu Studio).
   - Patterns other than rectilinear and grid.
+  - Modifiers only on the top and bottom layers (recipe 5.7): the logic comes from the
+    Bambu Studio source and the tests simulate the layer assignment, but it has not been
+    sliced yet.
   - The interface on Windows and the VS Code configuration in VS Code itself (tested on
     Linux with a virtual display, JSON files validated).
   - Any effect of the alternation on warping itself: the program prepares the
@@ -532,6 +564,12 @@ Main options:
   --infill-pattern NAME   pattern (default rectilinear)
   --inherit-infill        do not write density and pattern: those of the template apply
   --plate-rotation DEG    rotation of the part on the plate, with compensated angles
+  --bottom-layers N       modifiers only on the first N layers... (with --top-layers: the
+  --top-layers N          middle gets one modifier with no top/bottom layers, so the
+                          sparse infill is continuous; recipe 5.7)
+  --layer-height MM       layer height used for those blocks (default: the template's)
+  --first-layer-height MM first layer height (default: the template's)
+  --central-modifier auto|yes|no  modifier of the middle (auto: only for plain extrusions)
   --3mf-setting K=V       extra setting for every modifier (repeatable)
   --min-width MM          merge slivers narrower than this (default 2, 0 = off)
   --margin-xy, --margin-z extension of the modifiers

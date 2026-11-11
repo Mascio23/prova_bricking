@@ -35,6 +35,7 @@ usa questa tabella per ritrovarli nella finestra.
   Densita', Pattern                 ->  Density, Pattern
   Ruota il pezzo sul piatto         ->  Rotate the part on the plate
   Rotazione                         ->  Rotation
+  Modifier solo su top e bottom     ->  Modifiers only on the top and bottom layers
   Altre impostazioni dei modifier   ->  Other modifier settings
   Anteprima regioni                 ->  Preview regions
   Genera                            ->  Generate
@@ -258,6 +259,11 @@ SCHEDA 3 - PROGETTO BAMBU STUDIO
   Ruota il pezzo      Mette il pezzo inclinato sul piatto di questi gradi (antiorario
   sul piatto          visto dall'alto) e corregge gli angoli in modo che rispetto al pezzo
                       restino 45 e 135. Vedi la ricetta 4.3.
+  Modifier solo su    Limita i modifier delle regioni ai layer solidi di bottom e top e
+  top e bottom        lascia il centro del pezzo a un solo modifier senza layer top/bottom:
+                      l'infill sparso (grid, 15%...) resta continuo. Vedi la ricetta 4.7.
+                      Campi: Bottom layers, Top layers, Layer height e First layer height
+                      (vuoti = quelli del template), Central modifier.
   Altre impostazioni  Una per riga, nella forma CHIAVE=VALORE, applicate a tutti i
                       modifier. Esempio: top_shell_layers=7. Prevalgono sulle altre
                       opzioni. Le chiavi sono quelle di configurazione di Bambu Studio.
@@ -345,6 +351,30 @@ PATTERN DELL'INFILL SPARSO (scheda 3, campo Pattern)
      ridurle alza "Contatto minimo" (3-5 mm: i contatti piu' corti sono vertici e vengono
      ignorati; con 3 mm bastano tre angoli, con 15 regioni). L'alternanza piu' debole (45
      gradi tra una regione e le vicine) va dichiarata in tesi.
+
+4.7  INFILL SPARSO CONTINUO (MODIFIER SOLO SU TOP E BOTTOM)
+     Con un infill sotto il 100% ogni regione ha il suo infill e le linee di una regione
+     non si collegano a quelle della successiva. Per mantenerlo continuo: spunta "Modifier
+     solo su top e bottom" (scheda 3), scrivi quanti Bottom layers e Top layers (gli stessi
+     del tuo template, per esempio 3 e 5) e, se vuoi, l'altezza layer con cui fai lo slice
+     (vuota = quella del template). Imposta Densita' e Pattern per il centro del pezzo
+     (per esempio 15 e grid: il centro non e' sezionato, quindi Grid va bene). Da riga di
+     comando: --bottom-layers 3 --top-layers 5.
+     Cosa succede: ogni regione ha un modifier solo sui primi 3 e sugli ultimi 5 layer
+     (alternati 45/135, layer solidi); il centro del pezzo ha un solo modifier senza layer
+     top/bottom e con l'infill scelto, in un unico pezzo.
+     - FAI LO SLICE CON LA STESSA ALTEZZA LAYER: le altezze dei modifier sono calcolate da
+       essa. Il programma scrive le altezze e i layer previsti (per esempio "150 layers").
+     - Central modifier "auto": viene scritto solo se il pezzo e' un'estrusione semplice.
+       Se il pezzo ha un gradino o una tasca all'interno (la protezione del bottone luce ha
+       un gradino a z = 20) NON viene scritto: una superficie orizzontale nel centro non
+       avrebbe layer solidi. Il centro tiene allora le impostazioni del template: usa
+       blocchi spessi almeno quanto lo shell del template (il programma avvisa se no).
+     - Nel centro l'infill ha la direzione globale (nessuna alternanza, di proposito).
+       analyze_gcode.py controlla solo i primi e gli ultimi layer.
+     - NON ANCORA VERIFICATO IN STAMPA: progettato dai sorgenti di Bambu Studio e
+       controllato con test; guarda l'anteprima (i layer da 4 a N-5 devono essere sparsi) e
+       il G-code prima di stampare.
 
 4.6  LASCIARE L'INFILL COME NEL TEMPLATE
      Togli la spunta a "Imposta l'infill sparso": i modifier ricevono solo la direzione.
@@ -442,6 +472,8 @@ NON VERIFICATO
     della rotazione e' coerente con il formato 3MF e con i sorgenti di Bambu Studio, ma
     non l'ho visto in Bambu Studio).
   - Pattern diversi da rectilinear e grid.
+  - Modifier solo su top e bottom (ricetta 4.7): la logica viene dai sorgenti di Bambu
+    Studio e i test simulano l'assegnazione dei layer, ma non e' ancora stato fatto lo slice.
   - L'interfaccia grafica su Windows (provata su Linux con display virtuale).
   - Qualsiasi effetto dell'alternanza sul warping vero e proprio: il programma prepara
     la configurazione, la misura del warping e' il tuo esperimento.
@@ -547,6 +579,12 @@ Opzioni principali:
   --infill-pattern NOME   pattern (predefinito rectilinear)
   --inherit-infill        non scrivere densita' e pattern: valgono quelli del template
   --plate-rotation GRADI  rotazione del pezzo sul piatto, con angoli compensati
+  --bottom-layers N       modifier solo sui primi N layer... (con --top-layers: il centro
+  --top-layers N          ha un solo modifier senza layer top/bottom, l'infill sparso
+                          resta continuo; ricetta 4.7)
+  --layer-height MM       altezza layer usata per quei blocchi (predefinito: quella del template)
+  --first-layer-height MM altezza del primo layer (predefinito: quella del template)
+  --central-modifier auto|yes|no  modifier del centro (auto: solo per estrusioni semplici)
   --3mf-setting K=V       impostazione extra per ogni modifier (ripetibile)
   --margin-xy, --margin-z sporgenza dei modifier
   --no-stl, --no-png      non scrivere gli STL / il PNG

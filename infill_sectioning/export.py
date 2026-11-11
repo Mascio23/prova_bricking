@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from shapely.geometry import LineString, MultiPolygon
+from shapely.ops import unary_union
 
 from . import __version__
 from .sectioning import SectioningResult, coverage_error, modifier_footprints
@@ -59,20 +60,42 @@ def extrude(geom, z0: float, z1: float) -> trimesh.Trimesh:
 
 def write_modifier_stls(result: SectioningResult, out_dir: Path, z_min: float,
                         z_max: float, margin_xy: float, margin_z: float,
-                        prefix: str = "modifier"):
+                        prefix: str = "modifier", shells=None):
     """One STL per region, in the SAME coordinate frame as the input model.
 
     Z range: [z_min, z_max + margin_z]. The modifier is not extended below the
     part: nothing is printed there, and a modifier below the bed could shift
     the object when Bambu Studio drops it onto the plate.
+
+    With ``shells`` (a ShellPlan) each STL holds two separate blocks of the same outline:
+    the bottom one [z_min, plan.z_bottom] and the top one [plan.z_top, z_max + margin_z];
+    the middle of the part is left to the central modifier (see write_central_stl).
     """
     files = []
     for r, fp in zip(result.regions, modifier_footprints(result, margin_xy)):
         name = f"{prefix}_{r.id:02d}_{int(round(r.angle))}deg.stl"
-        mesh = extrude(fp, z_min, z_max + margin_z)
+        if shells is None:
+            mesh = extrude(fp, z_min, z_max + margin_z)
+        else:
+            mesh = trimesh.util.concatenate([extrude(fp, z_min, shells.z_bottom),
+                                             extrude(fp, shells.z_top, z_max + margin_z)])
         mesh.export(out_dir / name)
         files.append((name, fp, mesh))
     return files
+
+
+def write_central_stl(files, out_dir: Path, shells, prefix: str = "modifier"):
+    """The modifier of the middle of the part: the union of the outlines of all the region
+    modifiers, between the bottom and the top block. Returns (name, outline, mesh)."""
+    from .sectioning import clean_outline
+
+    union = unary_union([fp for _, fp, _ in files])
+    union = union.buffer(1e-4, join_style="mitre").buffer(-1e-4, join_style="mitre")
+    outline = clean_outline(union)
+    name = f"{prefix}_central.stl"
+    mesh = extrude(outline, shells.z_bottom, shells.z_top)
+    mesh.export(out_dir / name)
+    return name, outline, mesh
 
 
 # --------------------------------------------------------------------------- #

@@ -15,10 +15,12 @@ from infill_sectioning import __version__
 from infill_sectioning.bambu3mf import (Volume, build_3mf, infill_settings, pattern_choices,
                                         pattern_warning, placement, plate_fit_warning,
                                         read_template, write_3mf)
-from infill_sectioning.export import build_report, write_json, write_modifier_stls, write_png
+from infill_sectioning.export import (build_report, write_central_stl, write_json,
+                                      write_modifier_stls, write_png)
 from infill_sectioning.footprint import extract_footprint, load_mesh
 from infill_sectioning.moments import polygon_moments, raster_moments
 from infill_sectioning.sectioning import section
+from infill_sectioning.shells import CENTRAL_SETTINGS, plan_shells, prismatic_deviation
 
 
 def parse_args(argv=None):
@@ -82,15 +84,40 @@ def parse_args(argv=None):
                    help="do not write the sparse infill density and pattern into the "
                         "modifiers: they keep the ones of the template/process "
                         "(--infill-density and --infill-pattern are then ignored)")
-    p.add_argument("--infill-density", type=float, default=100.0, metavar="PCT",
+    p.add_argument("--infill-density", type=float, default=None, metavar="PCT",
                    help="sparse infill density [%%] of every modifier in the .3mf "
                         "(default 100 = fully solid). The top/bottom solid layers are not "
-                        "affected: they keep the 45/135 alternation")
-    p.add_argument("--infill-pattern", default="rectilinear",
+                        "affected: they keep the 45/135 alternation. With --bottom-layers / "
+                        "--top-layers it is the density of the central modifier (default: "
+                        "the template's)")
+    p.add_argument("--infill-pattern", default=None,
                    help="sparse infill pattern of every modifier in the .3mf, as named in "
-                        "the Bambu Studio menu (spaces -> hyphens). Default: rectilinear. "
+                        "the Bambu Studio menu (spaces -> hyphens). Default: rectilinear "
+                        "(with --bottom-layers / --top-layers: the template's, for the "
+                        "central modifier). "
                         "Single line direction per layer (best for the 45/135 alternation): "
                         "rectilinear, line, aligned-rectilinear. Others: " + pattern_choices())
+    p.add_argument("--bottom-layers", type=int, default=None, metavar="N",
+                   help="the region modifiers cover only the first N layers of the part "
+                        "(its bottom solid layers); together with --top-layers. The middle of "
+                        "the part is left to ONE modifier with no top/bottom layers, so the "
+                        "sparse infill (grid, ...) stays continuous across the regions")
+    p.add_argument("--top-layers", type=int, default=None, metavar="N",
+                   help="the region modifiers cover only the last N layers of the part "
+                        "(its top solid layers); together with --bottom-layers")
+    p.add_argument("--layer-height", type=float, default=None, metavar="MM",
+                   help="layer height used to size the modifier blocks (default: the "
+                        "template's layer_height, else 0.2). Must be the one you slice with")
+    p.add_argument("--first-layer-height", type=float, default=None, metavar="MM",
+                   help="height of the first layer (default: the template's "
+                        "initial_layer_print_height, else the layer height)")
+    p.add_argument("--central-modifier", choices=("auto", "yes", "no"), default="auto",
+                   help="with --bottom-layers / --top-layers: the modifier of the middle of "
+                        "the part, with no top/bottom layers. auto (default) = yes if the part "
+                        "is a plain extrusion, no if it has horizontal surfaces in the middle "
+                        "(steps, pockets: they would get no solid layers). With no, the middle "
+                        "keeps the global settings, whose top/bottom layer counts should not "
+                        "exceed the blocks'")
     p.add_argument("--3mf-setting", dest="mod_settings", action="append", default=[],
                    metavar="KEY=VALUE",
                    help="extra per-modifier override written into the .3mf, repeatable "
@@ -105,9 +132,47 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
+def shell_mode(args) -> bool:
+    """Modifiers only on the bottom and top layers (--bottom-layers / --top-layers)."""
+    return args.bottom_layers is not None or args.top_layers is not None
+
+
+def sparse_settings(args) -> dict:
+    """Sparse infill density / pattern written into the modifiers. In the shell mode they
+    go to the central modifier and only if asked for: otherwise the template's stay."""
+    if args.inherit_infill:
+        return {}
+    density, pattern = args.infill_density, args.infill_pattern
+    if shell_mode(args) and density is None and pattern is None:
+        return {}
+    out = infill_settings(100.0 if density is None else density, pattern or "rectilinear")
+    if shell_mode(args):
+        if density is None:
+            out.pop("sparse_infill_density")
+        if pattern is None:
+            out.pop("sparse_infill_pattern")
+    return out
+
+
 def check_args(args):
     """Reject impossible parameter values before doing any work."""
     problems = []
+    if (args.bottom_layers is None) != (args.top_layers is None):
+        problems.append("--bottom-layers and --top-layers go together: give both")
+    for flag, value in (("--bottom-layers", args.bottom_layers), ("--top-layers", args.top_layers)):
+        if value is not None and value < 1:
+            problems.append(f"{flag} must be at least 1")
+    for flag, value in (("--layer-height", args.layer_height),
+                        ("--first-layer-height", args.first_layer_height)):
+        if value is not None and not value > 0:
+            problems.append(f"{flag} must be greater than 0")
+    if not shell_mode(args) and (args.layer_height is not None
+                                 or args.first_layer_height is not None
+                                 or args.central_modifier != "auto"):
+        problems.append("--layer-height, --first-layer-height and --central-modifier "
+                        "only make sense with --bottom-layers and --top-layers")
+    if args.template_3mf is not None and not args.template_3mf.is_file():
+        problems.append(f"template file not found: {args.template_3mf}")
     if not args.max_area > 0:
         problems.append("--max-area must be greater than 0")
     if not args.max_ar >= 1:
@@ -161,17 +226,70 @@ def load_checked(args):
     return mesh, part, warnings
 
 
+def _template_number(template, key, default):
+    try:
+        return float(template.global_settings[key]) if template else default
+    except (KeyError, TypeError, ValueError):
+        return default
+
+
+def make_shell_plan(args, mesh, part, z_min, z_max, warnings):
+    """Blocks of the modifiers for --bottom-layers / --top-layers; adds to `warnings`."""
+    template = read_template(args.template_3mf) if args.template_3mf else None
+    lh = (args.layer_height if args.layer_height is not None
+          else _template_number(template, "layer_height", 0.2))
+    first = (args.first_layer_height if args.first_layer_height is not None
+             else _template_number(template, "initial_layer_print_height", lh))
+    try:
+        plan = plan_shells(z_min, z_max, args.bottom_layers, args.top_layers, lh, first,
+                           central=args.central_modifier != "no")
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}")
+    if plan.central:
+        dev = prismatic_deviation(mesh, part, plan.z_bottom, plan.z_top)
+        if dev > 0.02 and args.central_modifier == "auto":
+            plan.central = False
+            warnings.append(
+                f"the part is not a plain extrusion (slices in the middle differ from the "
+                f"footprint by up to {dev:.0%}: steps or closed pockets): NO central modifier. "
+                "It would have no top/bottom layers and the horizontal surfaces inside the "
+                "part would get no solid layers. The middle keeps the global settings")
+        elif dev > 0.02:
+            warnings.append(
+                f"the part is not a plain extrusion (slices in the middle differ from the "
+                f"footprint by up to {dev:.0%}): the central modifier has no top/bottom "
+                "layers, so horizontal surfaces inside the part (steps, closed pockets) get "
+                "no solid layers. Use --central-modifier auto or no")
+    if not plan.central and template is not None:
+        g = template.global_settings
+        for side, n in (("top", plan.top_layers), ("bottom", plan.bottom_layers)):
+            layers = _template_number(template, f"{side}_shell_layers", 0)
+            thick = _template_number(template, f"{side}_shell_thickness", 0)
+            eff = int(max(layers, -(-thick // lh) if thick > 0 else 0))
+            if eff > n:
+                warnings.append(
+                    f"without the central modifier the template's {side} shell ({eff} layers: "
+                    f"{side}_shell_layers={g.get(side + '_shell_layers')}, {side}_shell_thickness="
+                    f"{g.get(side + '_shell_thickness')} mm) is larger than the {n} layers of "
+                    f"the {side} block: {eff - n} more layer(s) below it will be solid, printed "
+                    "in the global direction. Use a central modifier or lower the template's value")
+    return plan
+
+
 def run(args) -> dict:
     check_args(args)
-    if args.export_3mf and not args.inherit_infill:  # fail early on a typo
+    if args.export_3mf:  # fail early on a typo
         try:
-            infill_settings(args.infill_density, args.infill_pattern)
+            sparse_settings(args)
         except ValueError as exc:
             raise SystemExit(f"error: {exc}")
     mesh, part, input_warnings = load_checked(args)
+    z_min, z_max = float(mesh.bounds[0, 2]), float(mesh.bounds[1, 2])
+    plan = None
+    if shell_mode(args):
+        plan = make_shell_plan(args, mesh, part, z_min, z_max, input_warnings)
     for w in input_warnings:
         print("WARNING:", w)
-    z_min, z_max = float(mesh.bounds[0, 2]), float(mesh.bounds[1, 2])
 
     moments_check = None
     if args.raster_pixel > 0:
@@ -199,9 +317,12 @@ def run(args) -> dict:
     prefix = args.prefix or args.model.stem
 
     mod_files = None
+    central = None
     if not args.no_stl or args.export_3mf:
         mod_files = write_modifier_stls(result, out, z_min, z_max, args.margin_xy,
-                                        args.margin_z, prefix=f"{prefix}_modifier")
+                                        args.margin_z, prefix=f"{prefix}_modifier", shells=plan)
+        if plan is not None and plan.central:
+            central = write_central_stl(mod_files, out, plan, prefix=f"{prefix}_modifier")
 
     params = {
         "mode": args.mode, "max_area_mm2": args.max_area, "max_ar": args.max_ar,
@@ -210,6 +331,7 @@ def run(args) -> dict:
         "extra_angles_deg": args.extra_angle or [],
         "max_depth": args.max_depth, "footprint_method": args.footprint,
         "margin_xy_mm": args.margin_xy, "margin_z_mm": args.margin_z,
+        "shell_modifiers": plan.as_dict() if plan else None,
     }
     input_info = {
         "file": str(args.model), "n_triangles": int(len(mesh.faces)),
@@ -218,6 +340,9 @@ def run(args) -> dict:
     }
     report = build_report(result, params, input_info, mod_files, moments_check)
     report["warnings"] = list(input_warnings)
+    if central:
+        report["central_modifier"] = {"modifier_stl": central[0],
+                                      "modifier_bbox": [round(v, 4) for v in central[1].bounds]}
     for entry, r in zip(report["regions"], result.regions):
         entry["plate_angle_deg"] = plate_angle(r.angle, args.plate_rotation)
     report["parameters"]["plate_rotation_deg"] = args.plate_rotation
@@ -233,7 +358,8 @@ def run(args) -> dict:
     write_json(report, out / f"{prefix}_sections.json")
 
     if args.export_3mf:
-        report["bambu_3mf"] = export_project(args, mesh, result, mod_files, out, prefix)
+        report["bambu_3mf"] = export_project(args, mesh, result, mod_files, out, prefix,
+                                             plan=plan, central=central)
         write_json(report, out / f"{prefix}_sections.json")
 
     if not args.no_png:
@@ -261,20 +387,28 @@ def parse_settings(items) -> dict:
     return settings
 
 
-def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
+def export_project(args, mesh, result, mod_files, out, prefix, plan=None, central=None) -> dict:
     try:
-        sparse = {} if args.inherit_infill else infill_settings(args.infill_density,
-                                                                args.infill_pattern)
-        extra = {**sparse, **parse_settings(args.mod_settings)}  # --3mf-setting wins
+        sparse = sparse_settings(args)
+        user = parse_settings(args.mod_settings)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
+    if plan is None:
+        extra = {**sparse, **user}  # --3mf-setting wins
+        block_extra, central_extra = extra, None
+    else:
+        block_extra = {**plan.settings_for_blocks(), **user}
+        central_extra = {**CENTRAL_SETTINGS, **sparse, **user}
+        extra = block_extra
     template = read_template(args.template_3mf) if args.template_3mf else None
     part_name = args.model.with_suffix(".stl").name
     volumes = [Volume(part_name, mesh, "normal_part")]
     theta = args.plate_rotation
     for r, (name, _, mmesh) in zip(result.regions, mod_files):
-        settings = {"infill_direction": f"{plate_angle(r.angle, theta):g}", **extra}
+        settings = {"infill_direction": f"{plate_angle(r.angle, theta):g}", **block_extra}
         volumes.append(Volume(name, mmesh, "modifier_part", settings))
+    if central is not None:
+        volumes.append(Volume(central[0], central[2], "modifier_part", central_extra))
     path = out / f"{prefix}.3mf"
     write_3mf(path, build_3mf(volumes, prefix, template, rotation_deg=theta))
     place = placement(volumes, template, theta)
@@ -291,24 +425,52 @@ def export_project(args, mesh, result, mod_files, out, prefix) -> dict:
         print("WARNING: large project (many modifiers or triangles): Bambu Studio may "
               "take a long time to open it. Consider larger --max-area / --max-ar or a "
               "lighter mesh.")
-    shells = (f"{template.global_settings.get('bottom_shell_layers', '?') if template else '?'} bottom / "
-              f"{template.global_settings.get('top_shell_layers', '?') if template else '?'} top")
-    if "sparse_infill_density" in extra or "sparse_infill_pattern" in extra:
-        print(f"3mf: sparse infill {extra.get('sparse_infill_density', 'from template')} "
-              f"{extra.get('sparse_infill_pattern', 'from template')} in every modifier; "
-              f"solid layers = {shells} (from the template), same 45/135 direction as the "
-              "sparse infill")
+    warning = None
+    if plan is not None:
+        print_shell_summary(plan, central_extra, central is not None)
+        if central is None and sparse:
+            print("WARNING: --infill-density / --infill-pattern are ignored: there is no "
+                  "central modifier, the middle of the part keeps the template's sparse infill")
     else:
-        print(f"3mf: sparse infill density and pattern inherited from the template; "
-              f"solid layers = {shells}")
-    warning = pattern_warning(template, extra)
-    if warning:
-        print("WARNING:", warning)
+        shells = (f"{template.global_settings.get('bottom_shell_layers', '?') if template else '?'} bottom / "
+                  f"{template.global_settings.get('top_shell_layers', '?') if template else '?'} top")
+        if "sparse_infill_density" in extra or "sparse_infill_pattern" in extra:
+            print(f"3mf: sparse infill {extra.get('sparse_infill_density', 'from template')} "
+                  f"{extra.get('sparse_infill_pattern', 'from template')} in every modifier; "
+                  f"solid layers = {shells} (from the template), same 45/135 direction as the "
+                  "sparse infill")
+        else:
+            print(f"3mf: sparse infill density and pattern inherited from the template; "
+                  f"solid layers = {shells}")
+        warning = pattern_warning(template, extra)
+        if warning:
+            print("WARNING:", warning)
     if template is None:
         print("NOTE: no --template-3mf given: the .3mf has no printer/filament/process "
               "settings, Bambu Studio will use the presets currently selected.")
-    return {"file": path.name, "template": str(args.template_3mf) if template else None,
+    info = {"file": path.name, "template": str(args.template_3mf) if template else None,
             "modifier_settings": extra, "warning": warning, "placement": place}
+    if plan is not None:
+        info["central_modifier_settings"] = central_extra
+    return info
+
+
+def print_shell_summary(plan, central_extra, has_central):
+    n = plan.n_layers
+    print(f"3mf: modifiers only on the solid layers (layer height {plan.layer_height:g} mm, "
+          f"first layer {plan.first_layer_height:g} mm, {n} layers): bottom block = layers "
+          f"1-{plan.bottom_layers} (z {plan.z_min:g}..{plan.z_bottom:.3f}), top block = layers "
+          f"{n - plan.top_layers + 1}-{n} (z {plan.z_top:.3f}..{plan.z_max:g}); each region "
+          f"modifier has {plan.bottom_layers} bottom / {plan.top_layers} top solid layers")
+    if has_central:
+        sparse = ", ".join(f"{k.replace('sparse_infill_', '')} {v}" for k, v in central_extra.items()
+                           if k.startswith("sparse_infill_")) or "the template's sparse infill"
+        print(f"3mf: central modifier z {plan.z_bottom:.3f}..{plan.z_top:.3f} "
+              f"(layers {plan.bottom_layers + 1}-{n - plan.top_layers}) with 0 top / 0 bottom "
+              f"layers and {sparse}: one region, the infill is continuous. Slice with the same "
+              "layer height or the blocks will not match the layers")
+    else:
+        print("3mf: no central modifier: the middle keeps the global settings")
 
 
 def main(argv=None) -> int:

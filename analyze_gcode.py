@@ -172,6 +172,19 @@ def main(argv=None) -> int:
                                          plate_bbox)})
     segs = analyze(lines, regions)
 
+    # modifiers only on the bottom / top layers: the middle is not sectioned, skip it
+    shell = (rep.get("parameters") or {}).get("shell_modifiers")
+    n_layers = sum(1 for ln in lines if ln.startswith("; CHANGE_LAYER"))
+    skipped = set()
+    if shell:
+        if n_layers != shell["n_layers"]:
+            print(f"WARNING: the G-code has {n_layers} layers, the modifiers were sized for "
+                  f"{shell['n_layers']} (layer height {shell['layer_height_mm']:g} mm, first "
+                  f"layer {shell['first_layer_height_mm']:g} mm): slice with the same values "
+                  "or the blocks do not match the layers")
+        skipped = {L for L in range(n_layers)
+                   if shell["bottom_layers"] <= L < n_layers - shell["top_layers"]}
+
     n = len(regions)
     print("part rotation on the plate: "
           f"{rotation:g} deg;  angles relative to the part: " + "  ".join(
@@ -181,6 +194,8 @@ def main(argv=None) -> int:
     ortho_bad, rel_bad, checked, pairs = [], [], 0, 0
     auto_layers = set()
     for L, f in sorted({(k[0], k[1]) for k in segs}):
+        if L in skipped:
+            continue
         cells, dom = [], {}
         for i in range(n):
             s = segs.get((L, f, i))
@@ -212,6 +227,10 @@ def main(argv=None) -> int:
                             circ_dist(a[0][0] - b[0][0], cfg) <= args.tolerance):
                         ortho_bad.append((L, f, r["id"], j, fmt(a), fmt(b), cfg))
 
+    if skipped:
+        print(f"\nmodifiers only on the first {shell['bottom_layers']} and the last "
+              f"{shell['top_layers']} layers: layers {min(skipped)}-{max(skipped)} (the middle, "
+              "not sectioned) are not checked")
     print(f"\nlayers with automatic bridge direction, not checked: {sorted(auto_layers) or 'none'}")
     print(f"adjacent region pairs checked: {pairs};  region-layers checked against the "
           f"configured angle: {checked}")

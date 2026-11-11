@@ -18,6 +18,7 @@ from .bambu3mf import pattern_key
 
 MODES = ("bisect", "nsplit")
 FOOTPRINTS = ("projection", "section")
+CENTRAL_CHOICES = ("auto", "yes", "no")
 
 
 @dataclass
@@ -54,6 +55,13 @@ class FormState:
     pattern: str = "rectilinear"
     use_rotation: bool = False
     rotation: str = "0"
+    # modifiers only on the bottom / top layers (the middle keeps a continuous infill)
+    use_shell_modifiers: bool = False
+    bottom_layers: str = "3"
+    top_layers: str = "5"
+    layer_height: str = ""         # empty: from the template, else 0.2
+    first_layer_height: str = ""   # empty: from the template, else the layer height
+    central_modifier: str = "auto"
     extra_settings: str = ""       # one KEY=VALUE per line
     # advanced
     step_tolerance: str = "0.05"
@@ -167,6 +175,16 @@ class FormState:
                     err.append(f"Pattern: {exc}")
             if self.use_rotation:
                 number("Rotation on the plate", self.rotation)
+        if self.export_3mf and self.use_shell_modifiers:
+            number("Bottom layers", self.bottom_layers, 1, integer=True)
+            number("Top layers", self.top_layers, 1, integer=True)
+            if self.layer_height.strip():
+                number("Layer height", self.layer_height, 0, lo_open=True)
+            if self.first_layer_height.strip():
+                number("First layer height", self.first_layer_height, 0, lo_open=True)
+            if self.central_modifier not in CENTRAL_CHOICES:
+                err.append(f"Central modifier: \"{self.central_modifier}\" is not valid")
+        if self.export_3mf:
             for ln in self.extra_setting_lines():
                 if "=" not in ln or not ln.split("=", 1)[0].strip():
                     err.append(f"Extra settings: \"{ln}\" is not in the form KEY=VALUE")
@@ -213,6 +231,15 @@ class FormState:
                 argv += ["--template-3mf", self.template.strip()]
             if self.use_rotation and self.num(self.rotation) != 0:
                 argv += ["--plate-rotation", t(self.rotation)]
+            if self.use_shell_modifiers:
+                argv += ["--bottom-layers", t(self.bottom_layers),
+                         "--top-layers", t(self.top_layers)]
+                if self.layer_height.strip():
+                    argv += ["--layer-height", t(self.layer_height)]
+                if self.first_layer_height.strip():
+                    argv += ["--first-layer-height", t(self.first_layer_height)]
+                if self.central_modifier != "auto":
+                    argv += ["--central-modifier", self.central_modifier]
             if self.set_infill:
                 argv += ["--infill-density", t(self.density), "--infill-pattern", self.pattern]
             else:

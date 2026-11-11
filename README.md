@@ -147,6 +147,9 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--inherit-infill` | | does not write density and pattern of the sparse infill in the modifiers: those of the template stay |
 | `--infill-density PCT` | 100 | sparse infill density [%] of every modifier in the `.3mf` (0–100) |
 | `--infill-pattern` | `rectilinear` | sparse infill pattern, with the Bambu Studio menu name (spaces → hyphens): see the pattern table below |
+| `--bottom-layers N`, `--top-layers N` | | the region modifiers cover **only** the first N and the last M layers; the middle gets one modifier with no top/bottom layers, so the sparse infill is continuous (see "Continuous sparse infill"). Always together |
+| `--layer-height MM`, `--first-layer-height MM` | template's | layer heights used to size those blocks: they must be the ones you slice with |
+| `--central-modifier auto\|yes\|no` | `auto` | the modifier of the middle: `auto` writes it only for a plain extrusion (no steps or pockets inside) |
 | `--3mf-setting KEY=VALUE` | | additional override for every modifier in the `.3mf`, repeatable |
 | `--no-stl`, `--no-png` | | do not write the STLs / the PNGs |
 | `--no-png-details` | | write only the clean PNG, not the one with the details |
@@ -398,6 +401,64 @@ the G-code of a real 20% specimen (H2D, Bambu Studio 2.08):
 As always, keep density and pattern in the DOE plan: density is a factor of its own, and
 the comparison between sectioned and non-sectioned specimens must be made at the same
 density.
+
+#### Continuous sparse infill: modifiers only on the top and bottom layers
+
+With a sparse infill (grid, 15 %, ...) each region has its own infill and the lines of one
+region do not join those of the next. If the continuity of the infill matters, limit the
+modifiers to the layers where the **solid** infill is printed (bottom and top shell), which
+are the only ones that need the 45°/135° alternation, and leave the middle of the part to
+the global infill:
+
+```bash
+python section_infill.py part.stl --out-dir output --export-3mf \
+    --template-3mf template_H2D_PA6.3mf --bottom-layers 3 --top-layers 5
+```
+
+What is written, for a part of N layers (the program prints the exact heights):
+
+| Modifier | Height | Settings |
+|---|---|---|
+| one per region, two blocks each (same outline) | bottom block = layers 1…B, top block = layers N−T+1…N | `infill_direction` (45/135), `bottom_shell_layers=B`, `top_shell_layers=T`, `bottom/top_shell_thickness=0` |
+| central, one (union of the outlines) | layers B+1…N−T | `top_shell_layers=0`, `bottom_shell_layers=0`, thickness 0; plus `--infill-density` / `--infill-pattern` if given, else the template's |
+
+How it was designed (checked in the Bambu Studio source, `PrintObject.cpp` and
+`Slicing.cpp`, not yet in a print):
+
+- A modifier belongs to a layer if it contains the plane at the **middle** of the layer.
+  The blocks end exactly on layer boundaries (first layer height, then the layer height),
+  half a layer away from any middle plane. A test simulates this for odd heights and thin
+  last layers.
+- A layer is made solid by looking at the top surfaces in the next `top_shell_layers`
+  layers (or `top_shell_thickness` mm), **using the numbers of the layer's own region**.
+  A block of T layers with `top_shell_layers=T` and thickness 0 is solid in all T layers.
+  If the middle kept the global value (5) while the block had 3, the 2 layers below the
+  block would also become solid, with the global direction: that is why the middle has its
+  own modifier with 0 layers (or why, without it, the block must have at least as many
+  layers as the template).
+- Top and bottom surfaces are found against the union of all regions
+  (`interface_shells` off, the default), so the boundaries between modifiers create no
+  solid layers of their own.
+
+Things to know:
+
+- **Slice with the same layer height** (`--layer-height`, default the template's, and
+  `--first-layer-height`): the heights of the blocks are computed from them. If the G-code
+  has a different number of layers than planned, `analyze_gcode.py` says so.
+- **Plain extrusions only for the central modifier.** With no top/bottom layers in the
+  middle, a horizontal surface inside the part (a step, a closed pocket) would get no solid
+  layers. With `--central-modifier auto` (default) the program slices the part at five
+  heights and writes no central modifier if the sections differ from the footprint by more
+  than 2 %; the middle then keeps the global settings (it warns if their shell is larger
+  than the blocks). Example: the light-button cover (30 mm tall, step at z = 20, 3 800 mm²
+  of ledge) gets no central modifier.
+- The density and pattern options now refer to the **middle**. Without them the template's
+  stay; the Grid warning does not apply (the middle is not sectioned on purpose).
+- The middle has **no alternation by design**: it prints the global direction. The 45°/135°
+  mosaic exists only on the solid layers. `analyze_gcode.py` checks only those layers.
+- The first solid layer above the sparse infill is the internal bridge, whose direction
+  Bambu chooses by itself (see above).
+- One volume per region (two blocks) keeps the number of modifiers at "regions + 1".
 
 #### Back to solid infill (100%)
 
