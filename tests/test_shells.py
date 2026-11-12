@@ -461,3 +461,97 @@ def test_form_state_wall_loops():
     assert any("Wall loops: must be at least 1" in m for m in
                FormState(model="p.stl", wall_loops="0").validate(check_files=False))
     assert FormState(model="p.stl", wall_loops="3").validate(check_files=False) == []
+
+
+# ---------------------------------------------------------- the middle turns with the part
+def test_the_middle_follows_the_rotation_of_the_part(tmp_path, capsys):
+    """The middle has no direction of its own and used to keep the process's 45 deg on the
+    plate: with the part turned by 42.4 deg its grid was not turned (seen in a G-code)."""
+    out, rep = run_cli(tmp_path, "--bottom-layers", "6", "--top-layers", "6",
+                       "--plate-rotation", "42.4", "--infill-density", "60",
+                       "--infill-pattern", "grid")
+    regions, central = block_and_central(out)
+    (_, c), = central.values()
+    assert c["infill_direction"] == "87.4"       # template's 45 + 42.4
+    assert {st["infill_direction"] for _, st in regions.values()} == {"87.4", "177.4"}
+    assert object_metadata(out / "bar.3mf")["infill_direction"] == "87.4"
+    assert rep["bambu_3mf"]["middle_infill_direction_deg"] == 87.4
+    assert "the infill of the middle turns with the part: infill_direction 45 -> 87.4" in \
+        capsys.readouterr().out
+
+
+def test_the_middle_is_not_touched_without_rotation(tmp_path):
+    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3")
+    _, central = block_and_central(out)
+    assert "infill_direction" not in next(iter(central.values()))[1]
+    assert "infill_direction" not in object_metadata(out / "bar.3mf")
+    assert rep["bambu_3mf"]["middle_infill_direction_deg"] == 45.0
+
+
+def test_the_middle_turns_also_without_a_central_modifier(tmp_path, capsys):
+    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3",
+                       "--central-modifier", "no", "--plate-rotation", "30")
+    _, central = block_and_central(out)
+    assert not central
+    assert object_metadata(out / "bar.3mf")["infill_direction"] == "75"   # 45 + 30
+    assert "(object)" in capsys.readouterr().out
+
+
+def test_user_setting_wins_over_the_turned_direction(tmp_path):
+    out, _ = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3",
+                     "--plate-rotation", "30", "--3mf-setting", "infill_direction=10")
+    _, central = block_and_central(out)
+    assert next(iter(central.values()))[1]["infill_direction"] == "10"
+
+
+def test_the_templates_direction_is_the_base(tmp_path):
+    """A template whose process uses another infill direction (here 0) is turned from it."""
+    src = zipfile.ZipFile(REF)
+    custom = tmp_path / "template0.3mf"
+    with zipfile.ZipFile(custom, "w", zipfile.ZIP_DEFLATED) as z:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "Metadata/project_settings.config":
+                cfg = json.loads(data)
+                cfg["infill_direction"] = "0"
+                data = json.dumps(cfg).encode()
+            z.writestr(item, data)
+    trimesh.creation.extrude_polygon(box(0, 0, 100, 20), height=10).export(tmp_path / "bar.stl")
+    out = tmp_path / "o"
+    section_infill.main([str(tmp_path / "bar.stl"), "--out-dir", str(out), "--export-3mf",
+                         "--template-3mf", str(custom), "--no-png", "--bottom-layers", "3",
+                         "--top-layers", "3", "--plate-rotation", "30"])
+    _, central = block_and_central(out)
+    assert next(iter(central.values()))[1]["infill_direction"] == "30"
+
+
+def test_analyze_gcode_checks_the_direction_of_the_middle(tmp_path, capsys):
+    from test_analyze_gcode import SECTIONS, gcode
+    sections = json.loads(json.dumps(SECTIONS))
+    sections["parameters"] = {"shell_modifiers": {
+        "bottom_layers": 1, "top_layers": 1, "n_layers": 4,
+        "layer_height_mm": 0.2, "first_layer_height_mm": 0.2}}
+    good = ("Sparse infill", [+1], [-1])
+    middle = ("Sparse infill", [+1], [+1])       # 45 deg everywhere, Grid-like middle
+    text = gcode([good, middle, middle, good])
+    g, s = tmp_path / "x.gcode", tmp_path / "s.json"
+    g.write_text(text)
+
+    def run(expected):
+        sections["bambu_3mf"] = {"middle_infill_direction_deg": expected,
+                                 "central_modifier_settings": {"sparse_infill_pattern": "grid"}}
+        s.write_text(json.dumps(sections))
+        return analyze_gcode.main([str(g), str(s), "--offset", "0", "0"])
+
+    assert run(45.0) == 0                          # 45 is the printed direction: OK
+    assert "middle layers checked for the infill direction: 2" in capsys.readouterr().out
+    assert run(135.0) == 0                         # 45 = 135 + 90: the other grid direction
+    assert run(87.4) == 1                          # the middle did not turn
+    out = capsys.readouterr().out
+    assert "MIDDLE INFILL NOT ROTATED WITH THE PART in 2 layers" in out
+    sections["bambu_3mf"]["central_modifier_settings"]["sparse_infill_pattern"] = "gyroid"
+    s.write_text(json.dumps(sections))
+    sections["bambu_3mf"]["middle_infill_direction_deg"] = 87.4
+    s.write_text(json.dumps(sections))
+    assert analyze_gcode.main([str(g), str(s), "--offset", "0", "0"]) == 0   # not checkable
+    assert "not a failure for this pattern" in capsys.readouterr().out

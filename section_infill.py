@@ -419,17 +419,24 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
         user = parse_settings(args.mod_settings)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
+    template = read_template(args.template_3mf) if args.template_3mf else None
+    theta = args.plate_rotation
+    mid_base = _template_number(template, "infill_direction", 45.0)
+    mid_dir = plate_angle(mid_base, theta)  # infill of the middle, on the plate
     if plan is None:
         extra = {**sparse, **user}  # --3mf-setting wins
         block_extra, central_extra = extra, None
     else:
+        # The middle has no direction of its own: it keeps the process's (45 deg on the
+        # plate), which does not follow a part rotated on the plate. So it gets the
+        # direction of the template plus the rotation, in the central modifier (and in the
+        # object, for the middle when there is no central modifier).
+        turn = {"infill_direction": f"{mid_dir:g}"} if theta else {}
         block_extra = {**plan.settings_for_blocks(), **user}
-        central_extra = {**CENTRAL_SETTINGS, **sparse, **user}
+        central_extra = {**CENTRAL_SETTINGS, **sparse, **turn, **user}
         extra = block_extra
-    template = read_template(args.template_3mf) if args.template_3mf else None
     part_name = args.model.with_suffix(".stl").name
     volumes = [Volume(part_name, mesh, "normal_part")]
-    theta = args.plate_rotation
     for r, (name, _, mmesh) in zip(result.regions, mod_files):
         settings = {"infill_direction": f"{plate_angle(r.angle, theta):g}", **block_extra}
         volumes.append(Volume(name, mmesh, "modifier_part", settings))
@@ -437,6 +444,8 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
         volumes.append(Volume(central[0], central[2], "modifier_part", central_extra))
     path = out / f"{prefix}.3mf"
     object_settings = {"wall_loops": str(args.wall_loops)} if args.wall_loops is not None else {}
+    if plan is not None and theta:
+        object_settings["infill_direction"] = f"{mid_dir:g}"
     write_3mf(path, build_3mf(volumes, prefix, template, rotation_deg=theta,
                               object_settings=object_settings))
     place = placement(volumes, template, theta)
@@ -454,6 +463,10 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
               "take a long time to open it. Consider larger --max-area / --max-ar or a "
               "lighter mesh.")
     warning = None
+    if plan is not None and theta:
+        print(f"3mf: the infill of the middle turns with the part: infill_direction "
+              f"{mid_base:g} -> {mid_dir:g} on the plate"
+              + (" (central modifier and object)" if central is not None else " (object)"))
     if plan is not None:
         print_shell_summary(plan, central_extra, central is not None,
                             bridge=has_sparse_below_top(central_extra, template, central is not None))
@@ -489,6 +502,7 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
             "modifier_settings": extra, "warning": warning, "placement": place}
     if plan is not None:
         info["central_modifier_settings"] = central_extra
+        info["middle_infill_direction_deg"] = mid_dir
     if object_settings:
         info["object_settings"] = object_settings
     return info

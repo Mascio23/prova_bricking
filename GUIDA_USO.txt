@@ -376,7 +376,11 @@ PATTERN DELL'INFILL SPARSO (scheda 3, campo Pattern)
        un gradino a z = 20) NON viene scritto: una superficie orizzontale nel centro non
        avrebbe layer solidi. Il centro tiene allora le impostazioni del template: usa
        blocchi spessi almeno quanto lo shell del template (il programma avvisa se no).
-     - Nel centro l'infill ha la direzione globale (nessuna alternanza, di proposito).
+     - Nel centro l'infill ha la direzione globale (nessuna alternanza, di proposito). Con
+       una rotazione sul piatto (pezzo in diagonale) anche il centro viene ruotato dello
+       stesso angolo (la direzione del template, 45, piu' la rotazione: per esempio 87.4 per
+       42.4), cosi' il grid mantiene la stessa posizione rispetto al pezzo.
+       analyze_gcode.py lo controlla.
        analyze_gcode.py controlla solo i primi e gli ultimi layer.
      - BLOCCHI COME "infill" (predefinito): ogni modifier di regione di top e bottom e' una
        zona autonoma, impostata cosi': 1 parete, top e bottom layer 0, infill 100%

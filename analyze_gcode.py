@@ -134,6 +134,47 @@ def to_plate(geom, placement, offset, rotation, part_bbox, plate_bbox):
     return affinity.translate(g, px - cx, py - cy)
 
 
+SINGLE_OR_DUAL = {"grid", "zig-zag", "line", "alignedrectilinear", "aligned-rectilinear"}
+
+
+def check_middle(segs, regions, rep, skipped, tolerance) -> bool:
+    """The middle (not sectioned) must follow the rotation of the part too: its infill lines
+    are at the recorded direction or 90 degrees from it (Grid has both, Rectilinear one per
+    layer). Returns True if they are not. Needs ``middle_infill_direction_deg`` in the JSON."""
+    expected = (rep.get("bambu_3mf") or {}).get("middle_infill_direction_deg")
+    if expected is None or not skipped:
+        return False
+    settings = (rep.get("bambu_3mf") or {}).get("central_modifier_settings") or {}
+    pattern = settings.get("sparse_infill_pattern")
+    checked = bad = 0
+    shown = None
+    for L in sorted(skipped):
+        seg = []
+        for i in range(len(regions)):
+            seg += segs.get((L, "Sparse infill", i), [])
+        cl = clusters(seg) if seg else []
+        if not cl:
+            continue
+        checked += 1
+        ok = all(circ_dist(a, expected) <= tolerance or circ_dist(a, expected + 90) <= tolerance
+                 for a, _ in cl)
+        if not ok:
+            bad += 1
+            shown = shown or (L, fmt(cl))
+    if not checked:
+        return False
+    print(f"middle layers checked for the infill direction: {checked} (expected {expected:g} or "
+          f"{(expected + 90) % 180:g} deg on the plate)")
+    if bad and (pattern is None or pattern.lower() in SINGLE_OR_DUAL):
+        print(f"MIDDLE INFILL NOT ROTATED WITH THE PART in {bad} layers, e.g. layer {shown[0]}: "
+              f"printed {shown[1]}, expected {expected:g} or {(expected + 90) % 180:g}")
+        return True
+    if bad:
+        print(f"NOTE: the middle infill ({pattern}) has other directions: not a failure for "
+              "this pattern")
+    return False
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("gcode", type=Path, help=".gcode or .gcode.3mf from Bambu Studio")
@@ -231,6 +272,7 @@ def main(argv=None) -> int:
         print(f"\nmodifiers only on the first {shell['bottom_layers']} and the last "
               f"{shell['top_layers']} layers: layers {min(skipped)}-{max(skipped)} (the middle, "
               "not sectioned) are not checked")
+    mid_bad = check_middle(segs, regions, rep, skipped, args.tolerance)
     print(f"\nlayers with automatic bridge direction, not checked: {sorted(auto_layers) or 'none'}")
     print(f"adjacent region pairs checked: {pairs};  region-layers checked against the "
           f"configured angle: {checked}")
@@ -248,6 +290,8 @@ def main(argv=None) -> int:
               f"{(next(r['angle'] for r in regions if r['id'] == e[2]) + rotation) % 180:g} or "
               f"{(next(r['angle'] for r in regions if r['id'] == e[2]) + rotation + 90) % 180:g} "
               "on the plate")
+    if mid_bad:
+        return 1
     if ortho_bad or rel_bad:
         return 1
     print("OK: adjacent regions print the configured angle difference, at the configured angle "

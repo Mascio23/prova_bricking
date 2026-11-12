@@ -474,6 +474,14 @@ Things to know:
   than 2 %; the middle then keeps the global settings (it warns if their shell is larger
   than the blocks). Example: the light-button cover (30 mm tall, step at z = 20, 3 800 mm²
   of ledge) gets no central modifier.
+- **The middle turns with the part.** With `--plate-rotation` (part on the diagonal) the middle
+  must be turned too: it has no direction of its own and used to keep the process's 45° on
+  the plate, so its grid was parallel/perpendicular to the part instead of at 45°/135° (seen
+  in a real G-code: 44.6° and 135° on a part at 42.7°). Now the central modifier gets
+  `infill_direction` = the template's direction (45° by default) + the rotation, and so does
+  the object (it covers the middle when there is no central modifier). `analyze_gcode.py`
+  checks it on the middle layers (`middle_infill_direction_deg` in the JSON; not for
+  patterns without a fixed direction, such as gyroid).
 - The density and pattern options now refer to the **middle**. Without them the template's
   stay; the Grid warning does not apply (the middle is not sectioned on purpose).
 - The middle has **no alternation by design**: it prints the global direction. The 45°/135°

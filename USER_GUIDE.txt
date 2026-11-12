@@ -351,7 +351,10 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
        NOT written: a horizontal surface in the middle would otherwise get no solid
        layers. The middle then keeps the template's settings, so use blocks at least as
        thick as the template's shell (the program warns if not).
-     - In the middle the infill has the global direction (no alternation, by design).
+     - In the middle the infill has the global direction (no alternation, by design). With
+       a rotation on the plate (part on the diagonal) the middle is turned too, by the same
+       angle (the template's direction, 45, plus the rotation: for example 87.4 for 42.4),
+       so its grid keeps the same position relative to the part. analyze_gcode.py checks it.
        analyze_gcode.py checks only the first and the last layers.
      - BLOCKS AS "infill" (default): each region modifier of the top and bottom is an
        autonomous zone, set like this: 1 wall, top and bottom layers 0, infill 100%
