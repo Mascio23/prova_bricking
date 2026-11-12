@@ -27,6 +27,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .bambu3mf import infill_settings
+
 # settings that make a modifier print no solid layers (the middle of the part)
 CENTRAL_SETTINGS = {"top_shell_layers": "0", "bottom_shell_layers": "0",
                     "top_shell_thickness": "0", "bottom_shell_thickness": "0"}
@@ -44,16 +46,33 @@ class ShellPlan:
     z_bottom: float        # top of the bottom block (model Z)
     z_top: float           # bottom of the top block (model Z)
     central: bool = True   # also a modifier for the middle, with no top / bottom layers
+    style: str = "infill"  # how the blocks make their layers: "infill" or "shells"
+    block_wall_loops: int = 1
 
     @property
     def central_layers(self) -> int:
         return self.n_layers - self.bottom_layers - self.top_layers
 
     def settings_for_blocks(self) -> dict[str, str]:
-        """Settings of the region modifiers: exactly N solid layers at each end."""
-        return {"bottom_shell_layers": str(self.bottom_layers),
-                "top_shell_layers": str(self.top_layers),
-                "bottom_shell_thickness": "0", "top_shell_thickness": "0"}
+        """Settings of the region modifiers (``infill_direction`` is added per region).
+
+        style "infill" (default): every layer of the block is a plain 100 % rectilinear
+        infill in the direction of its region, with ``block_wall_loops`` wall(s) around the
+        zone and no top/bottom shell: each block is an autonomous zone, as if drawn by hand.
+        This is what works with many walls: the wall count of the part then applies to the
+        middle only, and the zones are not filled with concentric wall loops.
+
+        style "shells": the layers are made solid by the shell logic: exactly N solid layers
+        at each end (``bottom/top_shell_layers = N``, thickness 0) and the walls of the part.
+        Verified with 2 walls; with many walls the zones fill up with loops around them."""
+        if self.style == "shells":
+            return {"bottom_shell_layers": str(self.bottom_layers),
+                    "top_shell_layers": str(self.top_layers),
+                    "bottom_shell_thickness": "0", "top_shell_thickness": "0"}
+        return {"wall_loops": str(self.block_wall_loops),
+                "bottom_shell_layers": "0", "top_shell_layers": "0",
+                "bottom_shell_thickness": "0", "top_shell_thickness": "0",
+                **infill_settings(100.0, "rectilinear")}
 
     def as_dict(self) -> dict:
         def r(v):
@@ -65,6 +84,7 @@ class ShellPlan:
                 "n_layers": self.n_layers,
                 "bottom_block_z_mm": [r(self.z_min), r(self.z_bottom)],
                 "top_block_z_mm": [r(self.z_top), r(self.z_max)],
+                "blocks_as": self.style, "block_wall_loops": self.block_wall_loops,
                 "central_modifier": self.central,
                 "central_z_mm": [r(self.z_bottom), r(self.z_top)]}
 
@@ -81,7 +101,12 @@ def layer_edges(height: float, layer_height: float, first_layer_height: float | 
 
 def plan_shells(z_min: float, z_max: float, bottom_layers: int, top_layers: int,
                 layer_height: float, first_layer_height: float | None = None,
-                central: bool = True) -> ShellPlan:
+                central: bool = True, style: str = "infill",
+                block_wall_loops: int = 1) -> ShellPlan:
+    if style not in ("infill", "shells"):
+        raise ValueError(f"unknown block style {style!r}: use infill or shells")
+    if block_wall_loops < 1:
+        raise ValueError("the walls of the blocks must be at least 1")
     if bottom_layers < 1 or top_layers < 1:
         raise ValueError("the number of bottom and top layers must be at least 1")
     if not layer_height > 0:
@@ -98,7 +123,8 @@ def plan_shells(z_min: float, z_max: float, bottom_layers: int, top_layers: int,
             "modifiers would cover the whole part. Leave out --bottom-layers / "
             "--top-layers (modifiers over the full height) or use fewer layers")
     return ShellPlan(bottom_layers, top_layers, layer_height, first, n, z_min, z_max,
-                     z_min + edges[bottom_layers], z_min + edges[n - top_layers], central)
+                     z_min + edges[bottom_layers], z_min + edges[n - top_layers], central,
+                     style, block_wall_loops)
 
 
 def layer_of_modifier(plan: ShellPlan, z0: float, z1: float) -> list[int]:

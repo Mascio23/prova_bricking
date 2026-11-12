@@ -238,7 +238,9 @@ TAB 3 - BAMBU STUDIO PROJECT
   the top and bottom  leaves the middle of the part to one modifier with no top/bottom
   layers             layers: the sparse infill (grid, 15%...) is then continuous. See
                       recipe 5.7. Fields: Bottom layers, Top layers, Layer height and First
-                      layer height (empty = those of the template), Central modifier.
+                      layer height (empty = those of the template), Central modifier,
+                      Blocks as (infill: autonomous zones; shells: solid layers made by
+                      Bambu) and Walls of the blocks (1).
   Other modifier      One per line, in the form KEY=VALUE, applied to all modifiers.
   settings            Example: top_shell_layers=7. They override the other options. The
                       keys are Bambu Studio configuration keys.
@@ -351,7 +353,18 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
        thick as the template's shell (the program warns if not).
      - In the middle the infill has the global direction (no alternation, by design).
        analyze_gcode.py checks only the first and the last layers.
-     - THE BRIDGE: the first top layer above a sparse infill is an internal bridge. Bambu
+     - BLOCKS AS "infill" (default): each region modifier of the top and bottom is an
+       autonomous zone, set like this: 1 wall, top and bottom layers 0, infill 100%
+       rectilinear, direction 45/135 of its zone (found by hand on a real specimen, as if
+       the top and bottom zones were built manually). Only the middle keeps the number of
+       walls you set (for example 6) and the sparse infill (for example 60% grid). The first
+       version ("shells") worked with 2 walls but with 6 walls the zones filled up with
+       loops of walls. Consequences: the first and last layers of the part are plain 100%
+       rectilinear infill (no top-surface pattern, no ironing); there is no bridge, so ALL
+       the layers of the blocks alternate; the first layer of the block is printed over the
+       gaps of the sparse infill without bridge flow: with a low density in the middle its
+       lines can sag.
+     - BLOCKS AS "shells" (old version): THE BRIDGE: the first top layer above a sparse infill is an internal bridge. Bambu
        Studio chooses its direction (perpendicular to the infill lines below) and gives
        neighbouring bridges the same angle: it does not alternate, and no setting changes
        that. So of T top layers, T-1 alternate: use one more top layer if you need that
@@ -573,6 +586,8 @@ Main options:
   --inherit-infill        do not write density and pattern: those of the template apply
   --plate-rotation DEG    rotation of the part on the plate, with compensated angles
   --wall-loops N          number of walls of the specimen (object setting in the .3mf)
+  --blocks-as infill|shells  top/bottom zones as autonomous zones (default) or solid layers
+  --block-wall-loops N    walls around each zone of the blocks (default 1)
   --bottom-layers N       modifiers only on the first N layers... (with --top-layers: the
   --top-layers N          middle gets one modifier with no top/bottom layers, so the
                           sparse infill is continuous; recipe 5.7)

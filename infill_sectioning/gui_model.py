@@ -19,6 +19,7 @@ from .bambu3mf import pattern_key
 MODES = ("bisect", "nsplit")
 FOOTPRINTS = ("projection", "section")
 CENTRAL_CHOICES = ("auto", "yes", "no")
+BLOCK_STYLES = ("infill", "shells")
 
 
 @dataclass
@@ -63,6 +64,8 @@ class FormState:
     layer_height: str = ""         # empty: from the template, else 0.2
     first_layer_height: str = ""   # empty: from the template, else the layer height
     central_modifier: str = "auto"
+    blocks_as: str = "infill"      # how the region modifiers make their layers
+    block_wall_loops: str = "1"
     extra_settings: str = ""       # one KEY=VALUE per line
     # advanced
     step_tolerance: str = "0.05"
@@ -187,6 +190,9 @@ class FormState:
                 number("First layer height", self.first_layer_height, 0, lo_open=True)
             if self.central_modifier not in CENTRAL_CHOICES:
                 err.append(f"Central modifier: \"{self.central_modifier}\" is not valid")
+            if self.blocks_as not in BLOCK_STYLES:
+                err.append(f"Blocks as: \"{self.blocks_as}\" is not valid")
+            number("Walls of the blocks", self.block_wall_loops, 1, integer=True)
         if self.export_3mf:
             for ln in self.extra_setting_lines():
                 if "=" not in ln or not ln.split("=", 1)[0].strip():
@@ -245,6 +251,10 @@ class FormState:
                     argv += ["--first-layer-height", t(self.first_layer_height)]
                 if self.central_modifier != "auto":
                     argv += ["--central-modifier", self.central_modifier]
+                if self.blocks_as != "infill":
+                    argv += ["--blocks-as", self.blocks_as]
+                if t(self.block_wall_loops) != "1":
+                    argv += ["--block-wall-loops", t(self.block_wall_loops)]
             if self.set_infill:
                 argv += ["--infill-density", t(self.density), "--infill-pattern", self.pattern]
             else:

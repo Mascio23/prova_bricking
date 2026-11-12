@@ -126,6 +126,18 @@ def parse_args(argv=None):
                    metavar="KEY=VALUE",
                    help="extra per-modifier override written into the .3mf, repeatable "
                         "(e.g. sparse_infill_pattern=zig-zag, sparse_infill_density=100%%)")
+    p.add_argument("--blocks-as", choices=("infill", "shells"), default="infill",
+                   help="with --bottom-layers / --top-layers, how the modifiers of the regions "
+                        "make their layers. infill (default): plain 100%% rectilinear infill "
+                        "in the direction of the region, 1 wall (--block-wall-loops) and no "
+                        "top/bottom shell: autonomous zones, they work with any number of "
+                        "walls. shells: the layers are made solid by the shell logic with "
+                        "the part's walls (OK with 2 walls; with many walls the zones fill "
+                        "with loops of walls)")
+    p.add_argument("--block-wall-loops", type=int, default=1, metavar="N",
+                   help="walls around each zone of the top/bottom blocks (--blocks-as infill); "
+                        "the number of walls of --wall-loops / the template applies to the "
+                        "middle only (default 1)")
     p.add_argument("--no-stl", action="store_true", help="do not write modifier STLs")
     p.add_argument("--no-png", action="store_true", help="do not write the PNG previews")
     p.add_argument("--no-png-details", action="store_true",
@@ -172,9 +184,13 @@ def check_args(args):
             problems.append(f"{flag} must be greater than 0")
     if not shell_mode(args) and (args.layer_height is not None
                                  or args.first_layer_height is not None
-                                 or args.central_modifier != "auto"):
-        problems.append("--layer-height, --first-layer-height and --central-modifier "
-                        "only make sense with --bottom-layers and --top-layers")
+                                 or args.central_modifier != "auto"
+                                 or args.blocks_as != "infill" or args.block_wall_loops != 1):
+        problems.append("--layer-height, --first-layer-height, --central-modifier, "
+                        "--blocks-as and --block-wall-loops only make sense with "
+                        "--bottom-layers and --top-layers")
+    if args.block_wall_loops < 1:
+        problems.append("--block-wall-loops must be at least 1")
     if args.template_3mf is not None and not args.template_3mf.is_file():
         problems.append(f"template file not found: {args.template_3mf}")
     if args.wall_loops is not None:
@@ -251,7 +267,8 @@ def make_shell_plan(args, mesh, part, z_min, z_max, warnings):
              else _template_number(template, "initial_layer_print_height", lh))
     try:
         plan = plan_shells(z_min, z_max, args.bottom_layers, args.top_layers, lh, first,
-                           central=args.central_modifier != "no")
+                           central=args.central_modifier != "no", style=args.blocks_as,
+                           block_wall_loops=args.block_wall_loops)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
     if plan.central:
@@ -269,7 +286,7 @@ def make_shell_plan(args, mesh, part, z_min, z_max, warnings):
                 f"footprint by up to {dev:.0%}): the central modifier has no top/bottom "
                 "layers, so horizontal surfaces inside the part (steps, closed pockets) get "
                 "no solid layers. Use --central-modifier auto or no")
-    if not plan.central and template is not None:
+    if not plan.central and template is not None and plan.style == "shells":
         g = template.global_settings
         for side, n in (("top", plan.top_layers), ("bottom", plan.bottom_layers)):
             layers = _template_number(template, f"{side}_shell_layers", 0)
@@ -507,11 +524,17 @@ def has_sparse_below_top(central_extra, template, has_central) -> bool:
 
 def print_shell_summary(plan, central_extra, has_central, bridge=True):
     n = plan.n_layers
-    print(f"3mf: modifiers only on the solid layers (layer height {plan.layer_height:g} mm, "
-          f"first layer {plan.first_layer_height:g} mm, {n} layers): bottom block = layers "
-          f"1-{plan.bottom_layers} (z {plan.z_min:g}..{plan.z_bottom:.3f}), top block = layers "
-          f"{n - plan.top_layers + 1}-{n} (z {plan.z_top:.3f}..{plan.z_max:g}); each region "
-          f"modifier has {plan.bottom_layers} bottom / {plan.top_layers} top solid layers")
+    if plan.style == "infill":
+        what = (f"each region modifier is an autonomous zone: 100% rectilinear infill in its "
+                f"direction, {plan.block_wall_loops} wall(s), no top/bottom shell")
+    else:
+        what = (f"each region modifier has {plan.bottom_layers} bottom / {plan.top_layers} top "
+                "solid layers (made by the shell logic, with the walls of the part)")
+    print(f"3mf: modifiers only on the top and bottom layers (layer height "
+          f"{plan.layer_height:g} mm, first layer {plan.first_layer_height:g} mm, {n} layers): "
+          f"bottom block = layers 1-{plan.bottom_layers} (z {plan.z_min:g}..{plan.z_bottom:.3f}), "
+          f"top block = layers {n - plan.top_layers + 1}-{n} (z {plan.z_top:.3f}..{plan.z_max:g}); "
+          f"{what}")
     if has_central:
         sparse = ", ".join(f"{k.replace('sparse_infill_', '')} {v}" for k, v in central_extra.items()
                            if k.startswith("sparse_infill_")) or "the template's sparse infill"
@@ -521,7 +544,14 @@ def print_shell_summary(plan, central_extra, has_central, bridge=True):
               "layer height or the blocks will not match the layers")
     else:
         print("3mf: no central modifier: the middle keeps the global settings")
-    if bridge:
+    if plan.style == "infill":
+        print("NOTE: the blocks have no top/bottom shell: the first and the last layers of the "
+              "part are 100% rectilinear infill (no top-surface pattern, no ironing), and no "
+              "bridge is generated over the sparse infill, so all the layers of the blocks "
+              "alternate. The first block layer is printed over the gaps of the sparse infill "
+              "without bridge flow or speed: the lower the density of the middle, the more "
+              "the lines can sag there")
+    elif bridge:
         print(f"NOTE: with a sparse infill under it, the first of the {plan.top_layers} top "
               "layers is an internal bridge: Bambu Studio picks its direction from the infill "
               "lines below and gives neighbouring bridges the same angle, so it does NOT "

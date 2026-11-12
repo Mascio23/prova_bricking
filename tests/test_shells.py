@@ -60,12 +60,29 @@ def test_plan_needs_a_middle_and_valid_numbers():
     assert plan_shells(0.0, 10.0, 3, 5, 0.2).central_layers == 42
 
 
-def test_block_settings_make_exactly_n_solid_layers():
-    plan = plan_shells(0.0, 10.0, 3, 5, 0.2)
+def test_blocks_as_shells_make_exactly_n_solid_layers():
+    plan = plan_shells(0.0, 10.0, 3, 5, 0.2, style="shells")
     s = plan.settings_for_blocks()
     assert s == {"bottom_shell_layers": "3", "top_shell_layers": "5",
                  "bottom_shell_thickness": "0", "top_shell_thickness": "0"}
     assert set(CENTRAL_SETTINGS.values()) == {"0"}  # no solid layers in the middle
+
+
+def test_blocks_as_infill_are_autonomous_zones():
+    """The settings found by hand on a real specimen: 1 wall, no top/bottom shell,
+    100 % rectilinear infill (the direction is added per region)."""
+    plan = plan_shells(0.0, 10.0, 6, 6, 0.2)
+    assert plan.style == "infill" and plan.block_wall_loops == 1
+    assert plan.settings_for_blocks() == {
+        "wall_loops": "1", "bottom_shell_layers": "0", "top_shell_layers": "0",
+        "bottom_shell_thickness": "0", "top_shell_thickness": "0",
+        "sparse_infill_density": "100%", "sparse_infill_pattern": "zig-zag"}
+    assert plan_shells(0.0, 10.0, 6, 6, 0.2, block_wall_loops=2).settings_for_blocks()[
+        "wall_loops"] == "2"
+    with pytest.raises(ValueError, match="walls of the blocks"):
+        plan_shells(0.0, 10.0, 6, 6, 0.2, block_wall_loops=0)
+    with pytest.raises(ValueError, match="unknown block style"):
+        plan_shells(0.0, 10.0, 6, 6, 0.2, style="x")
 
 
 def test_prismatic_deviation():
@@ -103,42 +120,91 @@ def run_cli(tmp_path, *flags, height=10.0, name="bar"):
     return out, json.loads((out / f"{name}_sections.json").read_text())
 
 
-def test_modifiers_only_on_the_solid_layers(tmp_path, capsys):
-    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "5",
-                       "--infill-density", "15", "--infill-pattern", "grid")
-    parts = parts_of(out / "bar.3mf")
+def block_and_central(out, name="bar"):
+    parts = parts_of(out / f"{name}.3mf")
     mods = {n: v for n, v in parts.items() if v[0] == "modifier_part"}
     central = {n: v for n, v in mods.items() if n.endswith("_central.stl")}
     regions = {n: v for n, v in mods.items() if n not in central}
+    return regions, central
+
+
+def check_blocks_geometry(out, name="bar", top_z=(9.0, 11.0), bottom_z=(0.0, 0.6),
+                          mid_z=(0.6, 9.0)):
+    """Two blocks per region, one block in the middle, all closed meshes."""
+    for f in sorted(out.glob(f"{name}_modifier_0*.stl")):
+        m = trimesh.load(f)
+        zs = sorted((round(b.bounds[0, 2], 3), round(b.bounds[1, 2], 3))
+                    for b in m.split(only_watertight=False))
+        assert zs == [bottom_z, top_z] and m.is_watertight
+    mid = trimesh.load(out / f"{name}_modifier_central.stl")
+    assert mid.is_watertight and mid.bounds[:, 2].round(3).tolist() == list(mid_z)
+
+
+def test_modifiers_only_on_the_top_and_bottom_layers(tmp_path, capsys):
+    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "5",
+                       "--infill-density", "15", "--infill-pattern", "grid")
+    regions, central = block_and_central(out)
     assert len(central) == 1 and len(regions) == rep["summary"]["n_regions"] == 4
-    for _, st in regions.values():
-        assert st["bottom_shell_layers"] == "3" and st["top_shell_layers"] == "5"
+    for _, st in regions.values():   # autonomous zones, found by hand on a real specimen
+        assert st["wall_loops"] == "1"
+        assert st["bottom_shell_layers"] == "0" and st["top_shell_layers"] == "0"
         assert st["bottom_shell_thickness"] == "0" and st["top_shell_thickness"] == "0"
+        assert st["sparse_infill_density"] == "100%" and st["sparse_infill_pattern"] == "zig-zag"
         assert st["infill_direction"] in ("45", "135")
-        assert "sparse_infill_density" not in st  # the sparse infill lives in the middle
     (_, c), = central.values()
     assert (c["top_shell_layers"], c["bottom_shell_layers"]) == ("0", "0")
     assert (c["top_shell_thickness"], c["bottom_shell_thickness"]) == ("0", "0")
     assert c["sparse_infill_density"] == "15%" and c["sparse_infill_pattern"] == "grid"
-    assert "infill_direction" not in c  # not sectioned: the global direction
-    # geometry: two blocks per region, one block in the middle, no overlaps, all closed
-    for f in sorted(out.glob("bar_modifier_0*.stl")):
-        m = trimesh.load(f)
-        zs = sorted((round(b.bounds[0, 2], 3), round(b.bounds[1, 2], 3))
-                    for b in m.split(only_watertight=False))
-        assert zs == [(0.0, 0.6), (9.0, 11.0)] and m.is_watertight
-    mid = trimesh.load(out / "bar_modifier_central.stl")
-    assert mid.is_watertight and mid.bounds[:, 2].round(3).tolist() == [0.6, 9.0]
+    assert "infill_direction" not in c and "wall_loops" not in c  # global direction, object walls
+    check_blocks_geometry(out)
     # report
     sh = rep["parameters"]["shell_modifiers"]
     assert (sh["bottom_layers"], sh["top_layers"], sh["n_layers"]) == (3, 5, 50)
     assert sh["layer_height_mm"] == 0.2 and sh["central_modifier"] is True
+    assert sh["blocks_as"] == "infill" and sh["block_wall_loops"] == 1
     assert sh["central_z_mm"] == [0.6, 9.0]
     assert rep["central_modifier"]["modifier_stl"] == "bar_modifier_central.stl"
     assert rep["bambu_3mf"]["central_modifier_settings"]["top_shell_layers"] == "0"
     text = capsys.readouterr().out
     assert "central modifier z 0.600..9.000" in text and "grid" in text
-    assert "alternation has no effect" not in text  # not an issue: the middle is not sectioned
+    assert "autonomous zone" in text and "no bridge is generated" in text
+    assert "alternation has no effect" not in text  # the middle is not sectioned on purpose
+
+
+def test_walls_of_the_part_apply_to_the_middle_only(tmp_path):
+    """With 6 walls the blocks must not inherit them: the zones would fill with loops."""
+    out, _ = run_cli(tmp_path, "--bottom-layers", "6", "--top-layers", "6", "--wall-loops", "6",
+                     "--infill-density", "60", "--infill-pattern", "grid")
+    assert object_metadata(out / "bar.3mf")["wall_loops"] == "6"
+    regions, central = block_and_central(out)
+    assert {st["wall_loops"] for _, st in regions.values()} == {"1"}
+    assert "wall_loops" not in next(iter(central.values()))[1]
+
+
+def test_block_wall_loops_option(tmp_path):
+    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3",
+                       "--block-wall-loops", "2")
+    regions, _ = block_and_central(out)
+    assert {st["wall_loops"] for _, st in regions.values()} == {"2"}
+    assert rep["parameters"]["shell_modifiers"]["block_wall_loops"] == 2
+
+
+def test_modifiers_on_the_solid_layers_with_the_shell_logic(tmp_path, capsys):
+    """--blocks-as shells: the first version, verified with 2 walls."""
+    out, rep = run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "5",
+                       "--blocks-as", "shells", "--infill-density", "15",
+                       "--infill-pattern", "grid")
+    regions, central = block_and_central(out)
+    for _, st in regions.values():
+        assert st["bottom_shell_layers"] == "3" and st["top_shell_layers"] == "5"
+        assert st["bottom_shell_thickness"] == "0" and st["top_shell_thickness"] == "0"
+        assert st["infill_direction"] in ("45", "135")
+        assert "sparse_infill_density" not in st and "wall_loops" not in st
+    (_, c), = central.values()
+    assert (c["top_shell_layers"], c["bottom_shell_layers"]) == ("0", "0")
+    check_blocks_geometry(out)
+    assert rep["parameters"]["shell_modifiers"]["blocks_as"] == "shells"
+    assert "made by the shell logic" in capsys.readouterr().out
 
 
 def test_without_density_options_the_middle_keeps_the_templates(tmp_path):
@@ -190,10 +256,15 @@ def test_ignored_density_without_central_modifier_is_reported(tmp_path, capsys):
 def test_blocks_shorter_than_the_templates_shell_are_reported(tmp_path, capsys):
     # template: top 5 layers / 1 mm. 3 top layers without a central modifier -> 2 solid
     # layers below the block would get the global direction
-    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3", "--central-modifier", "no")
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3", "--central-modifier", "no",
+            "--blocks-as", "shells")
     text = capsys.readouterr().out
     assert "template's top shell (5 layers" in text and "2 more layer(s)" in text
     assert "bottom shell" not in text  # 3 layers = the template's bottom_shell_layers
+    # the autonomous zones have no shell of their own: nothing to warn about
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "3", "--central-modifier", "no",
+            name="inf")
+    assert "template's top shell" not in capsys.readouterr().out
 
 
 def test_option_errors(tmp_path):
@@ -212,6 +283,10 @@ def test_option_errors(tmp_path):
     fails("--bottom-layers", "3", "--top-layers", "3", "--layer-height", "0", text="greater than 0")
     fails("--layer-height", "0.2", text="only make sense with --bottom-layers")
     fails("--central-modifier", "no", text="only make sense with --bottom-layers")
+    fails("--blocks-as", "shells", text="only make sense with --bottom-layers")
+    fails("--block-wall-loops", "2", text="only make sense with --bottom-layers")
+    fails("--bottom-layers", "3", "--top-layers", "3", "--block-wall-loops", "0",
+          text="--block-wall-loops must be at least 1")
     fails("--bottom-layers", "30", "--top-layers", "30", text="leave no middle")
     fails("--bottom-layers", "3", "--top-layers", "3", "--template-3mf",
           str(tmp_path / "nope.3mf"), text="template file not found")
@@ -256,6 +331,12 @@ def test_form_state_builds_the_shell_options():
     assert argv[argv.index("--layer-height") + 1] == "0.2"
     assert argv[argv.index("--central-modifier") + 1] == "no"
     assert "--first-layer-height" not in argv
+    assert "--blocks-as" not in argv and "--block-wall-loops" not in argv  # defaults
+    argv2 = FormState(model="p.stl", use_shell_modifiers=True, blocks_as="shells",
+                      block_wall_loops="2").to_argv()
+    assert argv2[argv2.index("--blocks-as") + 1] == "shells"
+    assert argv2[argv2.index("--block-wall-loops") + 1] == "2"
+    assert section_infill.parse_args(argv2).blocks_as == "shells"
     assert s.validate(check_files=False) == []
     args = section_infill.parse_args(argv)
     assert (args.bottom_layers, args.top_layers, args.central_modifier) == (3, 5, "no")
@@ -268,13 +349,16 @@ def test_form_state_builds_the_shell_options():
 
 def test_form_state_validates_the_shell_fields():
     bad = FormState(model="p.stl", use_shell_modifiers=True, bottom_layers="0", top_layers="a",
-                    layer_height="-1", first_layer_height="0", central_modifier="maybe")
+                    layer_height="-1", first_layer_height="0", central_modifier="maybe",
+                    blocks_as="x", block_wall_loops="0")
     msgs = bad.validate(check_files=False)
     assert any("Bottom layers: must be at least 1" in m for m in msgs)
     assert any("Top layers" in m and "not a number" in m for m in msgs)
     assert any("Layer height: must be greater than 0" in m for m in msgs)
     assert any("First layer height" in m for m in msgs)
     assert any("Central modifier" in m for m in msgs)
+    assert any("Blocks as" in m for m in msgs)
+    assert any("Walls of the blocks: must be at least 1" in m for m in msgs)
     # fields are not checked while the box is unticked
     assert FormState(model="p.stl", bottom_layers="zero").validate(check_files=False) == []
     # presets keep the new fields
@@ -294,13 +378,20 @@ def test_footprint_union_of_the_central_modifier_covers_the_part(tmp_path):
 
 # ----------------------------------------------------------------------- bridge note
 def test_bridge_note_only_when_there_is_a_sparse_infill_under_the_top(tmp_path, capsys):
-    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--infill-density", "15")
+    # blocks as shells: the first top layer is a bridge
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--blocks-as", "shells",
+            "--infill-density", "15")
     text = capsys.readouterr().out
     assert "the first of the 4 top layers is an internal bridge" in text
     assert "3 of the 4 top layers do" in text
-    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--infill-density", "100",
-            name="solid")
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--blocks-as", "shells",
+            "--infill-density", "100", name="solid")
     assert "internal bridge" not in capsys.readouterr().out
+    # blocks as infill (default): no bridge at all, every layer of the blocks alternates
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--infill-density", "15",
+            name="inf")
+    text = capsys.readouterr().out
+    assert "internal bridge" not in text and "all the layers of the blocks alternate" in text
 
 
 # ------------------------------------------------------------------------ wall loops

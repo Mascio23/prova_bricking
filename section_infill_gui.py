@@ -47,8 +47,8 @@ from tkinter import filedialog, messagebox, ttk  # noqa: E402
 
 import section_infill  # noqa: E402
 from infill_sectioning.bambu3mf import pattern_names  # noqa: E402
-from infill_sectioning.gui_model import (CENTRAL_CHOICES, FOOTPRINTS, MODES,  # noqa: E402
-                                         FormState)
+from infill_sectioning.gui_model import (BLOCK_STYLES, CENTRAL_CHOICES,  # noqa: E402
+                                         FOOTPRINTS, MODES, FormState)
 
 LAST_STATE = Path.home() / ".infill_sectioning_gui.json"
 PREVIEW_WIDTH = 620  # only used if Pillow is missing (it comes with matplotlib)
@@ -249,12 +249,23 @@ class App(tk.Tk):
         self.disable_when += [("use_shell_modifiers", w) for w in (
             self.bottom_entry, self.top_entry, self.lh_entry, self.flh_entry,
             self.central_entry)]
+        self.style_entry = self._row(t3, 16, "   Blocks as", "blocks_as", 8,
+                                     values=list(BLOCK_STYLES),
+                                     hint="infill = autonomous zones (100% rectilinear, "
+                                          "no top/bottom shell): works with any number of "
+                                          "walls. shells = solid layers made by Bambu "
+                                          "(OK with 2 walls)")
+        self.blockwall_entry = self._row(t3, 17, "   Walls of the blocks", "block_wall_loops", 8,
+                                         hint="walls around each zone (infill mode); "
+                                              "\"Wall loops\" above applies to the middle")
+        self.disable_when += [("use_shell_modifiers", self.style_entry),
+                              ("use_shell_modifiers", self.blockwall_entry)]
         ttk.Label(t3, text="Other modifier settings, one per line (KEY=VALUE):"
-                  ).grid(row=16, column=0, columnspan=4, sticky="w", pady=(10, 2))
+                  ).grid(row=18, column=0, columnspan=4, sticky="w", pady=(10, 2))
         self.settings_text = tk.Text(t3, height=4, width=44)
-        self.settings_text.grid(row=17, column=0, columnspan=4, sticky="we")
+        self.settings_text.grid(row=19, column=0, columnspan=4, sticky="we")
         ttk.Label(t3, text="for example  top_shell_layers=7   (they override the other options)",
-                  foreground="#666").grid(row=18, column=0, columnspan=4, sticky="w")
+                  foreground="#666").grid(row=20, column=0, columnspan=4, sticky="w")
         self.bambu_widgets = [self.tpl_entry, self.density_entry, self.pattern_entry,
                               self.rot_entry, self.wall_entry, self.settings_text]
 

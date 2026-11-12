@@ -149,6 +149,8 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--infill-pattern` | `rectilinear` | sparse infill pattern, with the Bambu Studio menu name (spaces → hyphens): see the pattern table below |
 | `--bottom-layers N`, `--top-layers N` | | the region modifiers cover **only** the first N and the last M layers; the middle gets one modifier with no top/bottom layers, so the sparse infill is continuous (see "Continuous sparse infill"). Always together |
 | `--layer-height MM`, `--first-layer-height MM` | template's | layer heights used to size those blocks: they must be the ones you slice with |
+| `--blocks-as infill\|shells` | `infill` | how the region modifiers make their layers: `infill` = autonomous zones (1 wall, no top/bottom shell, 100 % rectilinear in the region's direction); `shells` = solid layers made by the shell logic (see below) |
+| `--block-wall-loops N` | 1 | walls around each zone of the blocks (`--blocks-as infill`); `--wall-loops` / the template apply to the middle only |
 | `--central-modifier auto\|yes\|no` | `auto` | the modifier of the middle: `auto` writes it only for a plain extrusion (no steps or pockets inside) |
 | `--wall-loops N` | template's | number of walls of the specimen, written into the `.3mf` as an **object** setting (same for the part and all the modifiers); needs `--export-3mf` |
 | `--3mf-setting KEY=VALUE` | | additional override for every modifier in the `.3mf`, repeatable |
@@ -420,8 +422,27 @@ What is written, for a part of N layers (the program prints the exact heights):
 
 | Modifier | Height | Settings |
 |---|---|---|
-| one per region, two blocks each (same outline) | bottom block = layers 1…B, top block = layers N−T+1…N | `infill_direction` (45/135), `bottom_shell_layers=B`, `top_shell_layers=T`, `bottom/top_shell_thickness=0` |
+| one per region, two blocks each (same outline) | bottom block = layers 1…B, top block = layers N−T+1…N | `--blocks-as infill` (default): `infill_direction` (45/135), `wall_loops=1`, `top/bottom_shell_layers=0`, `sparse_infill_density=100%`, `sparse_infill_pattern=zig-zag` (rectilinear). `--blocks-as shells`: `infill_direction`, `bottom_shell_layers=B`, `top_shell_layers=T`, `bottom/top_shell_thickness=0` |
 | central, one (union of the outlines) | layers B+1…N−T | `top_shell_layers=0`, `bottom_shell_layers=0`, thickness 0; plus `--infill-density` / `--infill-pattern` if given, else the template's |
+
+**Why the blocks are "autonomous zones" by default.** A first version (`--blocks-as shells`)
+let the shell logic make the block layers solid with the walls of the part. With 2 walls it
+worked (G-code verified: 3 + 3 solid layers, continuous sparse middle). With **6 walls** the
+zones of the blocks were filled with concentric loops of walls instead of the alternated
+infill (seen in the Bambu Studio preview of a real specimen). The remedy was found by hand on
+two contiguous modifiers, then adopted: each block modifier gets **1 wall, no top/bottom layers,
+100 % rectilinear infill and the 45°/135° direction of its zone**, as if the zones of the top and
+bottom were built by hand; only the middle keeps the number of walls of the part (6) and the
+sparse infill (60 % grid). I do not know yet exactly why the shell version fills the zones with
+walls (the Bambu Studio source says regions with the same wall settings share their perimeters);
+the autonomous zones avoid the question, and use the same mechanism that was verified on the
+100 % G-code (rectilinear 100 % + `infill_direction`).
+Consequences of the autonomous zones: the real top and bottom layers of the part are plain
+100 % rectilinear infill (no top-surface pattern, no ironing, no bottom-surface pattern);
+there is **no internal bridge** (all the layers of the blocks alternate), but the first block
+layer is printed over the gaps of the sparse infill without bridge flow or speed: with a low
+density in the middle the lines can sag there; and the zones have 1 wall around them, also
+along the outer contour of the part in those layers (the middle keeps the part's walls).
 
 How it was designed (checked in the Bambu Studio source, `PrintObject.cpp` and
 `Slicing.cpp`, not yet in a print):
@@ -457,7 +478,7 @@ Things to know:
   stay; the Grid warning does not apply (the middle is not sectioned on purpose).
 - The middle has **no alternation by design**: it prints the global direction. The 45°/135°
   mosaic exists only on the solid layers. `analyze_gcode.py` checks only those layers.
-- **The internal bridge cannot be made to alternate.** The first solid layer above the
+- **(`--blocks-as shells` only) The internal bridge cannot be made to alternate.** The first solid layer above the
   sparse infill is an internal bridge. In the Bambu Studio source (`bridge_over_infill`) its
   angle is computed from the infill lines below (perpendicular to the dominant direction,
   per bridged area) and **the surfaces that touch get the same angle**; there is no setting
