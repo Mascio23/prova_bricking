@@ -36,6 +36,7 @@ usa questa tabella per ritrovarli nella finestra.
   Ruota il pezzo sul piatto         ->  Rotate the part on the plate
   Rotazione                         ->  Rotation
   Modifier solo su top e bottom     ->  Modifiers only on the top and bottom layers
+  Numero di pareti                  ->  Wall loops
   Altre impostazioni dei modifier   ->  Other modifier settings
   Anteprima regioni                 ->  Preview regions
   Genera                            ->  Generate
@@ -259,6 +260,9 @@ SCHEDA 3 - PROGETTO BAMBU STUDIO
   Ruota il pezzo      Mette il pezzo inclinato sul piatto di questi gradi (antiorario
   sul piatto          visto dall'alto) e corregge gli angoli in modo che rispetto al pezzo
                       restino 45 e 135. Vedi la ricetta 4.3.
+  Wall loops          Numero di pareti (wall) del provino (vuoto = quelle del template).
+                      Scritto come impostazione dell'oggetto: valgono per pezzo e modifier.
+                      Il programma avvisa se le pareti occupano quasi tutto lo spessore.
   Modifier solo su    Limita i modifier delle regioni ai layer solidi di bottom e top e
   top e bottom        lascia il centro del pezzo a un solo modifier senza layer top/bottom:
                       l'infill sparso (grid, 15%...) resta continuo. Vedi la ricetta 4.7.
@@ -372,6 +376,11 @@ PATTERN DELL'INFILL SPARSO (scheda 3, campo Pattern)
        blocchi spessi almeno quanto lo shell del template (il programma avvisa se no).
      - Nel centro l'infill ha la direzione globale (nessuna alternanza, di proposito).
        analyze_gcode.py controlla solo i primi e gli ultimi layer.
+     - IL BRIDGE: il primo strato top sopra un infill sparso e' un internal bridge. Bambu
+       Studio ne sceglie la direzione (perpendicolare alle linee dell'infill sotto) e da' lo
+       stesso angolo ai bridge vicini: non alterna e nessuna impostazione lo cambia. Quindi
+       su T layer di top, T-1 alternano: usa un top layer in piu' se ti servono quelli. Il
+       bottom non ha bridge. Con un infill al 100% non c'e' bridge.
      - NON ANCORA VERIFICATO IN STAMPA: progettato dai sorgenti di Bambu Studio e
        controllato con test; guarda l'anteprima (i layer da 4 a N-5 devono essere sparsi) e
        il G-code prima di stampare.
@@ -579,6 +588,7 @@ Opzioni principali:
   --infill-pattern NOME   pattern (predefinito rectilinear)
   --inherit-infill        non scrivere densita' e pattern: valgono quelli del template
   --plate-rotation GRADI  rotazione del pezzo sul piatto, con angoli compensati
+  --wall-loops N          numero di pareti del provino (impostazione oggetto nel .3mf)
   --bottom-layers N       modifier solo sui primi N layer... (con --top-layers: il centro
   --top-layers N          ha un solo modifier senza layer top/bottom, l'infill sparso
                           resta continuo; ricetta 4.7)

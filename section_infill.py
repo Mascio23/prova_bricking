@@ -118,6 +118,10 @@ def parse_args(argv=None):
                         "(steps, pockets: they would get no solid layers). With no, the middle "
                         "keeps the global settings, whose top/bottom layer counts should not "
                         "exceed the blocks'")
+    p.add_argument("--wall-loops", type=int, default=None, metavar="N",
+                   help="number of walls (perimeters) of the specimen, written into the .3mf "
+                        "as an object setting (default: the template's wall_loops). It applies "
+                        "to the part and to every modifier alike")
     p.add_argument("--3mf-setting", dest="mod_settings", action="append", default=[],
                    metavar="KEY=VALUE",
                    help="extra per-modifier override written into the .3mf, repeatable "
@@ -173,6 +177,11 @@ def check_args(args):
                         "only make sense with --bottom-layers and --top-layers")
     if args.template_3mf is not None and not args.template_3mf.is_file():
         problems.append(f"template file not found: {args.template_3mf}")
+    if args.wall_loops is not None:
+        if args.wall_loops < 1:
+            problems.append("--wall-loops must be at least 1")
+        if not args.export_3mf:
+            problems.append("--wall-loops is written into the .3mf: add --export-3mf")
     if not args.max_area > 0:
         problems.append("--max-area must be greater than 0")
     if not args.max_ar >= 1:
@@ -410,7 +419,9 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
     if central is not None:
         volumes.append(Volume(central[0], central[2], "modifier_part", central_extra))
     path = out / f"{prefix}.3mf"
-    write_3mf(path, build_3mf(volumes, prefix, template, rotation_deg=theta))
+    object_settings = {"wall_loops": str(args.wall_loops)} if args.wall_loops is not None else {}
+    write_3mf(path, build_3mf(volumes, prefix, template, rotation_deg=theta,
+                              object_settings=object_settings))
     place = placement(volumes, template, theta)
     if theta:
         print(f"3mf: part rotated by {theta:g} deg on the plate; infill_direction on the plate = "
@@ -427,7 +438,8 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
               "lighter mesh.")
     warning = None
     if plan is not None:
-        print_shell_summary(plan, central_extra, central is not None)
+        print_shell_summary(plan, central_extra, central is not None,
+                            bridge=has_sparse_below_top(central_extra, template, central is not None))
         if central is None and sparse:
             print("WARNING: --infill-density / --infill-pattern are ignored: there is no "
                   "central modifier, the middle of the part keeps the template's sparse infill")
@@ -445,6 +457,14 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
         warning = pattern_warning(template, extra)
         if warning:
             print("WARNING:", warning)
+    if args.wall_loops is not None:
+        print(f"3mf: {args.wall_loops} wall loops (object setting, the same for the part and "
+              "every modifier"
+              + (f"; the template has {template.global_settings.get('wall_loops', '?')}"
+                 if template else "") + ")")
+        thin = wall_warning(mesh, args.wall_loops, template)
+        if thin:
+            print("WARNING:", thin)
     if template is None:
         print("NOTE: no --template-3mf given: the .3mf has no printer/filament/process "
               "settings, Bambu Studio will use the presets currently selected.")
@@ -452,10 +472,40 @@ def export_project(args, mesh, result, mod_files, out, prefix, plan=None, centra
             "modifier_settings": extra, "warning": warning, "placement": place}
     if plan is not None:
         info["central_modifier_settings"] = central_extra
+    if object_settings:
+        info["object_settings"] = object_settings
     return info
 
 
-def print_shell_summary(plan, central_extra, has_central):
+def wall_warning(mesh, loops, template):
+    """Warn when the walls leave almost no room for infill (and so for the sectioning)."""
+    from infill_sectioning.footprint import extract_footprint
+
+    part = extract_footprint(mesh, "projection")
+    width = 2.0 * part.area / max(part.length, 1e-9)  # mean thickness of the footprint
+    line = _template_number(template, "outer_wall_line_width", 0.42)
+    inner = _template_number(template, "inner_wall_line_width", 0.45)
+    walls = 2.0 * (line + (loops - 1) * inner)
+    if walls >= 0.8 * width:
+        return (f"{loops} wall loops take about {walls:.1f} mm of the {width:.1f} mm mean "
+                "thickness of the part: almost no room is left for infill, so the sectioning "
+                "has little or no effect")
+    return None
+
+
+def has_sparse_below_top(central_extra, template, has_central) -> bool:
+    """True unless the infill under the top block is known to be 100 % (then there is no
+    internal bridge)."""
+    raw = (central_extra or {}).get("sparse_infill_density") if has_central else None
+    if raw is None and template is not None:
+        raw = template.global_settings.get("sparse_infill_density")
+    try:
+        return raw is None or float(str(raw).rstrip("%")) < 100
+    except ValueError:
+        return True
+
+
+def print_shell_summary(plan, central_extra, has_central, bridge=True):
     n = plan.n_layers
     print(f"3mf: modifiers only on the solid layers (layer height {plan.layer_height:g} mm, "
           f"first layer {plan.first_layer_height:g} mm, {n} layers): bottom block = layers "
@@ -471,6 +521,12 @@ def print_shell_summary(plan, central_extra, has_central):
               "layer height or the blocks will not match the layers")
     else:
         print("3mf: no central modifier: the middle keeps the global settings")
+    if bridge:
+        print(f"NOTE: with a sparse infill under it, the first of the {plan.top_layers} top "
+              "layers is an internal bridge: Bambu Studio picks its direction from the infill "
+              "lines below and gives neighbouring bridges the same angle, so it does NOT "
+              f"alternate ({plan.top_layers - 1} of the {plan.top_layers} top layers do). Use "
+              "one top layer more if you need that many alternating ones")
 
 
 def main(argv=None) -> int:

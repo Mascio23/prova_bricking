@@ -150,6 +150,7 @@ python section_infill.py specimen.step --out-dir ./output          # STEP (needs
 | `--bottom-layers N`, `--top-layers N` | | the region modifiers cover **only** the first N and the last M layers; the middle gets one modifier with no top/bottom layers, so the sparse infill is continuous (see "Continuous sparse infill"). Always together |
 | `--layer-height MM`, `--first-layer-height MM` | template's | layer heights used to size those blocks: they must be the ones you slice with |
 | `--central-modifier auto\|yes\|no` | `auto` | the modifier of the middle: `auto` writes it only for a plain extrusion (no steps or pockets inside) |
+| `--wall-loops N` | template's | number of walls of the specimen, written into the `.3mf` as an **object** setting (same for the part and all the modifiers); needs `--export-3mf` |
 | `--3mf-setting KEY=VALUE` | | additional override for every modifier in the `.3mf`, repeatable |
 | `--no-stl`, `--no-png` | | do not write the STLs / the PNGs |
 | `--no-png-details` | | write only the clean PNG, not the one with the details |
@@ -456,9 +457,28 @@ Things to know:
   stay; the Grid warning does not apply (the middle is not sectioned on purpose).
 - The middle has **no alternation by design**: it prints the global direction. The 45°/135°
   mosaic exists only on the solid layers. `analyze_gcode.py` checks only those layers.
-- The first solid layer above the sparse infill is the internal bridge, whose direction
-  Bambu chooses by itself (see above).
+- **The internal bridge cannot be made to alternate.** The first solid layer above the
+  sparse infill is an internal bridge. In the Bambu Studio source (`bridge_over_infill`) its
+  angle is computed from the infill lines below (perpendicular to the dominant direction,
+  per bridged area) and **the surfaces that touch get the same angle**; there is no setting
+  to switch it off or to give it a direction (`bridge_angle` is for external bridges). In
+  your G-code the whole bridge layer is at 135° on all 16 regions. Consequence: of the T top
+  layers, T−1 alternate. If you need N alternating top layers, use `--top-layers N+1`; for
+  the DOE compare sectioned and control specimens with the same number of top layers.
+  The bottom has no bridge (it rests on the plate). It is probably a second-order effect
+  for warping (which starts near the bed), but that is a hypothesis, not a measurement.
 - One volume per region (two blocks) keeps the number of modifiers at "regions + 1".
+
+#### Number of walls
+
+`--wall-loops N` (field "Wall loops" in tab 3) sets the number of walls of the specimen. It
+is written as a setting of the **object** in the `.3mf` (checked in the Bambu Studio loader:
+metadata directly under `<object>` become the object's configuration), so the part and every
+modifier have the same number of walls and the regions keep sharing their perimeters. Without
+the option the template's `wall_loops` stays. The program warns when the walls take 80 % or
+more of the mean thickness of the footprint (then almost no infill is left, and the
+sectioning has little effect). The number of walls is a factor of the DOE of its own:
+keep it equal between sectioned and control specimens.
 
 #### Back to solid infill (100%)
 

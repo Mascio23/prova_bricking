@@ -227,18 +227,21 @@ class App(tk.Tk):
         self.rot_entry = self._row(t3, 7, "   Rotation [°]", "rotation", 8,
                                    hint="counter-clockwise; H2D diagonal ≈ 42.4")
         self.disable_when.append(("use_rotation", self.rot_entry))
-        ttk.Separator(t3).grid(row=8, column=0, columnspan=4, sticky="we", pady=8)
-        self._check(t3, 9, "Modifiers only on the top and bottom layers (the middle keeps a "
+        self.wall_entry = self._row(t3, 8, "Wall loops", "wall_loops", 8,
+                                    hint="number of walls of the specimen; empty = the "
+                                         "template's")
+        ttk.Separator(t3).grid(row=9, column=0, columnspan=4, sticky="we", pady=8)
+        self._check(t3, 10, "Modifiers only on the top and bottom layers (the middle keeps a "
                     "continuous infill)", "use_shell_modifiers")
-        self.bottom_entry = self._row(t3, 10, "   Bottom layers", "bottom_layers", 8,
+        self.bottom_entry = self._row(t3, 11, "   Bottom layers", "bottom_layers", 8,
                                       hint="solid layers at the bottom; the modifier is this many layers tall")
-        self.top_entry = self._row(t3, 11, "   Top layers", "top_layers", 8,
+        self.top_entry = self._row(t3, 12, "   Top layers", "top_layers", 8,
                                    hint="solid layers at the top; the modifier is this many layers tall")
-        self.lh_entry = self._row(t3, 12, "   Layer height [mm]", "layer_height", 8,
+        self.lh_entry = self._row(t3, 13, "   Layer height [mm]", "layer_height", 8,
                                   hint="empty = the template's (else 0.2). Must be the one you slice with")
-        self.flh_entry = self._row(t3, 13, "   First layer height [mm]", "first_layer_height", 8,
+        self.flh_entry = self._row(t3, 14, "   First layer height [mm]", "first_layer_height", 8,
                                    hint="empty = the template's (else the layer height)")
-        self.central_entry = self._row(t3, 14, "   Central modifier", "central_modifier", 8,
+        self.central_entry = self._row(t3, 15, "   Central modifier", "central_modifier", 8,
                                        values=list(CENTRAL_CHOICES),
                                        hint="auto = yes for a plain extrusion, no if the part has "
                                             "steps or pockets inside. Its density and pattern are "
@@ -247,13 +250,13 @@ class App(tk.Tk):
             self.bottom_entry, self.top_entry, self.lh_entry, self.flh_entry,
             self.central_entry)]
         ttk.Label(t3, text="Other modifier settings, one per line (KEY=VALUE):"
-                  ).grid(row=15, column=0, columnspan=4, sticky="w", pady=(10, 2))
+                  ).grid(row=16, column=0, columnspan=4, sticky="w", pady=(10, 2))
         self.settings_text = tk.Text(t3, height=4, width=44)
-        self.settings_text.grid(row=16, column=0, columnspan=4, sticky="we")
+        self.settings_text.grid(row=17, column=0, columnspan=4, sticky="we")
         ttk.Label(t3, text="for example  top_shell_layers=7   (they override the other options)",
-                  foreground="#666").grid(row=17, column=0, columnspan=4, sticky="w")
+                  foreground="#666").grid(row=18, column=0, columnspan=4, sticky="w")
         self.bambu_widgets = [self.tpl_entry, self.density_entry, self.pattern_entry,
-                              self.rot_entry, self.settings_text]
+                              self.rot_entry, self.wall_entry, self.settings_text]
 
         # ---- right: preview + log ---------------------------------------------
         right.rowconfigure(0, weight=3)

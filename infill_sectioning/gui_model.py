@@ -55,6 +55,7 @@ class FormState:
     pattern: str = "rectilinear"
     use_rotation: bool = False
     rotation: str = "0"
+    wall_loops: str = ""           # empty: the template's
     # modifiers only on the bottom / top layers (the middle keeps a continuous infill)
     use_shell_modifiers: bool = False
     bottom_layers: str = "3"
@@ -175,6 +176,8 @@ class FormState:
                     err.append(f"Pattern: {exc}")
             if self.use_rotation:
                 number("Rotation on the plate", self.rotation)
+        if self.export_3mf and self.wall_loops.strip():
+            number("Wall loops", self.wall_loops, 1, integer=True)
         if self.export_3mf and self.use_shell_modifiers:
             number("Bottom layers", self.bottom_layers, 1, integer=True)
             number("Top layers", self.top_layers, 1, integer=True)
@@ -231,6 +234,8 @@ class FormState:
                 argv += ["--template-3mf", self.template.strip()]
             if self.use_rotation and self.num(self.rotation) != 0:
                 argv += ["--plate-rotation", t(self.rotation)]
+            if self.wall_loops.strip():
+                argv += ["--wall-loops", t(self.wall_loops)]
             if self.use_shell_modifiers:
                 argv += ["--bottom-layers", t(self.bottom_layers),
                          "--top-layers", t(self.top_layers)]

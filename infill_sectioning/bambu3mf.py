@@ -270,7 +270,8 @@ def _m4(t) -> str:
 
 
 def build_3mf(volumes: list[Volume], object_name: str,
-              template: Template | None = None, rotation_deg: float = 0.0) -> dict[str, bytes]:
+              template: Template | None = None, rotation_deg: float = 0.0,
+              object_settings: dict[str, str] | None = None) -> dict[str, bytes]:
     """Return the archive content {path: bytes}. volumes[0] should be the part.
 
     rotation_deg rotates the whole object (part and modifiers) about the vertical axis
@@ -354,7 +355,9 @@ def build_3mf(volumes: list[Volume], object_name: str,
         f'  <object id="{obj_id}">\n'
         f"    <metadata key=\"name\" value={quoteattr(object_name)}/>\n"
         f'    <metadata key="extruder" value="{t.extruder}"/>\n'
-        f'    <metadata face_count="{total_faces}"/>\n'
+        + "".join(f"    <metadata key={quoteattr(k)} value={quoteattr(str(v))}/>\n"
+                  for k, v in (object_settings or {}).items() if k not in ("name", "extruder"))
+        + f'    <metadata face_count="{total_faces}"/>\n'
         + "".join(parts) + "  </object>\n"
         "  <plate>\n"
         '    <metadata key="plater_id" value="1"/>\n'

@@ -290,3 +290,83 @@ def test_footprint_union_of_the_central_modifier_covers_the_part(tmp_path):
                                                    round(union.bounds[1], 3)]
     assert mid.bounds[1, :2].round(3).tolist() == [round(union.bounds[2], 3),
                                                    round(union.bounds[3], 3)]
+
+
+# ----------------------------------------------------------------------- bridge note
+def test_bridge_note_only_when_there_is_a_sparse_infill_under_the_top(tmp_path, capsys):
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--infill-density", "15")
+    text = capsys.readouterr().out
+    assert "the first of the 4 top layers is an internal bridge" in text
+    assert "3 of the 4 top layers do" in text
+    run_cli(tmp_path, "--bottom-layers", "3", "--top-layers", "4", "--infill-density", "100",
+            name="solid")
+    assert "internal bridge" not in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------------ wall loops
+def object_metadata(path):
+    """Metadata keys written directly under <object> (the object's own settings)."""
+    with zipfile.ZipFile(path) as z:
+        cfg = z.read("Metadata/model_settings.config").decode()
+    obj = re.search(r"<object id=\"\d+\">(.*?)<part ", cfg, re.S).group(1)
+    return dict(re.findall(r'<metadata key="(\w+)" value="([^"]*)"/>', obj))
+
+
+def test_wall_loops_is_an_object_setting(tmp_path, capsys):
+    out, rep = run_cli(tmp_path, "--wall-loops", "4")
+    meta = object_metadata(out / "bar.3mf")
+    assert meta["wall_loops"] == "4" and meta["name"] == "bar" and "extruder" in meta
+    assert rep["bambu_3mf"]["object_settings"] == {"wall_loops": "4"}
+    # not a modifier setting: modifiers inherit the object's, all with the same walls
+    for _, (sub, st) in parts_of(out / "bar.3mf").items():
+        assert "wall_loops" not in st
+    text = capsys.readouterr().out
+    assert "4 wall loops (object setting" in text and "the template has 2" in text
+
+
+def test_without_the_option_the_templates_walls_stay(tmp_path):
+    out, rep = run_cli(tmp_path)
+    assert "wall_loops" not in object_metadata(out / "bar.3mf")
+    assert "object_settings" not in rep["bambu_3mf"]
+
+
+def test_wall_loops_with_a_shell_plan_and_rotation(tmp_path):
+    out, rep = run_cli(tmp_path, "--wall-loops", "3", "--bottom-layers", "3", "--top-layers", "3",
+                       "--plate-rotation", "30")
+    assert object_metadata(out / "bar.3mf")["wall_loops"] == "3"
+    assert rep["parameters"]["shell_modifiers"]["top_layers"] == 3
+
+
+def test_walls_that_fill_the_part_are_reported(tmp_path, capsys):
+    run_cli(tmp_path, "--wall-loops", "25")   # 25 walls ~ 22 mm of a 100 x 20 mm bar (2A/P = 16.7)
+    text = capsys.readouterr().out
+    assert "wall loops take about" in text and "little or no effect" in text
+    run_cli(tmp_path, "--wall-loops", "3", name="few")
+    assert "wall loops take" not in capsys.readouterr().out
+
+
+def test_wall_loops_option_errors(tmp_path):
+    trimesh.creation.extrude_polygon(box(0, 0, 100, 20), height=10).export(tmp_path / "b.stl")
+
+    def fails(*flags, text):
+        with pytest.raises(SystemExit) as exc:
+            section_infill.main([str(tmp_path / "b.stl"), "--out-dir", str(tmp_path / "o"),
+                                 "--no-png", *flags])
+        assert text in str(exc.value)
+
+    fails("--export-3mf", "--wall-loops", "0", text="--wall-loops must be at least 1")
+    fails("--wall-loops", "3", text="add --export-3mf")
+
+
+def test_form_state_wall_loops():
+    s = FormState(model="p.stl", wall_loops="4")
+    argv = s.to_argv()
+    assert argv[argv.index("--wall-loops") + 1] == "4"
+    assert section_infill.parse_args(argv).wall_loops == 4
+    assert "--wall-loops" not in FormState(model="p.stl").to_argv()
+    assert "--wall-loops" not in FormState(model="p.stl", wall_loops="4",
+                                           export_3mf=False).to_argv()
+    assert FormState(model="p.stl", wall_loops="x").validate(check_files=False)
+    assert any("Wall loops: must be at least 1" in m for m in
+               FormState(model="p.stl", wall_loops="0").validate(check_files=False))
+    assert FormState(model="p.stl", wall_loops="3").validate(check_files=False) == []

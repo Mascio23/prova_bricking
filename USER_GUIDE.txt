@@ -231,6 +231,9 @@ TAB 3 - BAMBU STUDIO PROJECT
   Rotate the part     Places the part tilted on the plate by these degrees
   on the plate        (counter-clockwise seen from above) and corrects the angles so that
                       relative to the part they stay 45 and 135. See recipe 5.3.
+  Wall loops          Number of walls of the specimen (empty = those of the template).
+                      Written as an object setting: part and modifiers share it. The
+                      program warns if the walls take almost all the thickness.
   Modifiers only on   Limits the region modifiers to the bottom and top solid layers and
   the top and bottom  leaves the middle of the part to one modifier with no top/bottom
   layers             layers: the sparse infill (grid, 15%...) is then continuous. See
@@ -348,6 +351,11 @@ SPARSE INFILL PATTERNS (tab 3, field Pattern)
        thick as the template's shell (the program warns if not).
      - In the middle the infill has the global direction (no alternation, by design).
        analyze_gcode.py checks only the first and the last layers.
+     - THE BRIDGE: the first top layer above a sparse infill is an internal bridge. Bambu
+       Studio chooses its direction (perpendicular to the infill lines below) and gives
+       neighbouring bridges the same angle: it does not alternate, and no setting changes
+       that. So of T top layers, T-1 alternate: use one more top layer if you need that
+       many. The bottom has no bridge. With a 100% infill there is no bridge.
      - NOT YET VERIFIED IN A PRINT: it was designed from the Bambu Studio source and
        checked with tests; look at the preview (layers 4 to N-5 must be sparse) and at the
        G-code before printing.
@@ -564,6 +572,7 @@ Main options:
   --infill-pattern NAME   pattern (default rectilinear)
   --inherit-infill        do not write density and pattern: those of the template apply
   --plate-rotation DEG    rotation of the part on the plate, with compensated angles
+  --wall-loops N          number of walls of the specimen (object setting in the .3mf)
   --bottom-layers N       modifiers only on the first N layers... (with --top-layers: the
   --top-layers N          middle gets one modifier with no top/bottom layers, so the
                           sparse infill is continuous; recipe 5.7)
