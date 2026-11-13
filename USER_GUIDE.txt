@@ -62,7 +62,9 @@ The list must show --export-3mf, --plate-rotation, --extra-angle, --infill-densi
 --------------------------------------------------------------------------------------------
 
 The window has three tabs on the left, the preview and the log on the right, the
-equivalent command and the buttons at the bottom.
+equivalent command and the buttons at the bottom. The bottom bar is always visible; a tab
+taller than the window scrolls (mouse wheel or the bar on its right); you can drag the bar
+between the preview and the log, and the one between the tabs and the preview.
 
 STEP 1 - Tab "1. Part and files"
   - Model (STL or STEP): press Browse... and choose the STL (or STEP) of the part.

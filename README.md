@@ -46,6 +46,11 @@ If you prefer not to type commands:
 python section_infill_gui.py
 ```
 
+The window adapts to the screen: the command and the buttons stay visible at the bottom
+whatever its height, each tab scrolls (mouse wheel or the bar on its right) when it is taller
+than the window, and you can drag the bar between the preview and the log, or the one between
+the tabs and the preview, to give room to either.
+
 ![interface, Bambu Studio tab](docs/gui_bambu.png)
 
 The window has three tabs:

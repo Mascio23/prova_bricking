@@ -123,3 +123,57 @@ def test_presets_and_last_state(app, tmp_path):
     assert app.v["density"].get() == "35"
     app._close()
     assert FormState.load(tmp_path / "last.json").density == "35"
+
+
+# ------------------------------------------------------------------- window layout
+def settle(app):
+    for _ in range(3):
+        app.update()
+        time.sleep(0.1)
+
+
+def bottom_bar(app):
+    return next(w for w in app.winfo_children() if w.winfo_class() == "TFrame"
+                and str(w.winfo_children()[0].cget("text")) == "Equivalent command:")
+
+
+@pytest.mark.parametrize("geometry", ["1260x780", "1000x560", "900x520"])
+def test_the_command_bar_is_visible_at_any_window_size(app, geometry):
+    """The tab 3 is taller than a small window: the bar with the command and the buttons used
+    to be pushed out of the window."""
+    app.geometry(geometry)
+    for tab in range(3):
+        app.notebook.select(tab)
+        settle(app)
+        bar = bottom_bar(app)
+        assert bar.winfo_y() >= 0
+        assert bar.winfo_y() + bar.winfo_height() <= app.winfo_height()
+        assert bar.winfo_height() > 60   # command box, buttons and status are all there
+
+
+def test_tabs_scroll_when_they_are_taller_than_the_window(app):
+    app.geometry("1000x560")
+    app.notebook.select(2)
+    settle(app)
+    tab = app.nametowidget(app.notebook.select())
+    assert isinstance(tab, section_infill_gui.ScrollFrame)
+    assert tab._bar_shown                       # the content does not fit: a bar appears
+    assert tab.canvas.yview()[1] < 1.0
+    tab.canvas.yview_moveto(1.0)
+    settle(app)
+    assert tab.canvas.yview()[1] == pytest.approx(1.0)
+    # a tall window needs no bar
+    app.geometry("1260x1100")
+    settle(app)
+    assert not tab._bar_shown or tab.canvas.yview() == (0.0, 1.0)
+
+
+def test_preview_and_log_can_be_resized(app):
+    app.geometry("1260x780")
+    settle(app)
+    split = app.split
+    assert str(split.cget("orient")) == "vertical"
+    h0 = app.canvas.winfo_height()
+    split.sashpos(0, split.sashpos(0) + 80)     # drag the bar down: a taller preview
+    settle(app)
+    assert app.canvas.winfo_height() > h0

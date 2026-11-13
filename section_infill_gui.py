@@ -69,12 +69,68 @@ class _QueueWriter:
         pass
 
 
+class ScrollFrame(ttk.Frame):
+    """A frame whose content scrolls vertically (mouse wheel or bar) when it is taller than
+    the window: the fields go into ``inner``."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        bg = ttk.Style().lookup("TFrame", "background") or "#f0f0f0"
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, bg=bg)
+        self.bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self._on_scroll)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.inner = ttk.Frame(self.canvas, padding=12)
+        self._win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", self._on_inner)
+        self.canvas.bind("<Configure>", self._on_canvas)
+        self.bind("<Enter>", self._grab_wheel)
+        self.bind("<Leave>", self._release_wheel)
+        self._bar_shown = False
+
+    def _on_inner(self, _e=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._update_bar()
+
+    def _on_canvas(self, e):
+        self.canvas.itemconfigure(self._win, width=e.width)
+        self._update_bar()
+
+    def _on_scroll(self, lo, hi):
+        self.bar.set(lo, hi)
+
+    def _update_bar(self):
+        need = self.inner.winfo_reqheight() > self.canvas.winfo_height() > 1
+        if need and not self._bar_shown:
+            self.bar.pack(side="right", fill="y", before=self.canvas)
+            self._bar_shown = True
+        elif not need and self._bar_shown:
+            self.bar.pack_forget()
+            self._bar_shown = False
+
+    def _wheel(self, e):
+        if isinstance(e.widget, tk.Text) or not self._bar_shown:
+            return
+        step = -1 if (getattr(e, "num", 0) == 4 or getattr(e, "delta", 0) > 0) else 1
+        self.canvas.yview_scroll(step * 2, "units")
+
+    def _grab_wheel(self, _e=None):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.bind_all(seq, self._wheel)
+
+    def _release_wheel(self, _e=None):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.unbind_all(seq)
+
+
 class App(tk.Tk):
     def __init__(self, state: FormState | None = None):
         super().__init__()
         self.title("Infill sectioning (Shen, Veeramani, Qin 2026)")
-        self.geometry("1260x780")
-        self.minsize(1100, 720)
+        # fit the screen (a laptop is not 1260 x 780 high), keep the bottom bar reachable
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{min(1260, sw - 40)}x{min(780, sh - 120)}")
+        self.minsize(min(960, sw - 40), min(520, sh - 120))
         self.q: queue.Queue = queue.Queue()
         self.busy = False
         self.preview_img = None   # what is on the canvas (PhotoImage)
@@ -139,8 +195,34 @@ class App(tk.Tk):
         return c
 
     def _build(self):
+        # The bar with the command and the buttons is packed FIRST (at the bottom), so it is
+        # always visible whatever the height of the window; the tabs scroll instead.
+        bottom = ttk.Frame(self)
+        bottom.pack(side="bottom", fill="x", padx=8, pady=(0, 8))
+        ttk.Label(bottom, text="Equivalent command:").pack(anchor="w")
+        cmdbox = ttk.Frame(bottom)
+        cmdbox.pack(fill="x")
+        cmdbar = ttk.Scrollbar(cmdbox, orient="vertical")
+        self.cmd = tk.Text(cmdbox, height=3, wrap="word", bg="#f7f7f5", state="disabled",
+                           yscrollcommand=cmdbar.set)
+        cmdbar.configure(command=self.cmd.yview)
+        cmdbar.pack(side="right", fill="y")
+        self.cmd.pack(side="left", fill="x", expand=True)
+        bar = ttk.Frame(bottom)
+        bar.pack(fill="x", pady=(6, 0))
+        self.btn_prev = ttk.Button(bar, text="Preview regions", command=self.preview)
+        self.btn_gen = ttk.Button(bar, text="Generate", command=self.generate)
+        self.btn_prev.pack(side="left")
+        self.btn_gen.pack(side="left", padx=6)
+        ttk.Button(bar, text="Open output folder", command=self.open_out).pack(side="left")
+        ttk.Button(bar, text="Copy command", command=self.copy_cmd).pack(side="right")
+        ttk.Button(bar, text="Load preset…", command=self.load_preset).pack(side="right", padx=6)
+        ttk.Button(bar, text="Save preset…", command=self.save_preset).pack(side="right")
+        self.status = ttk.Label(bottom, text="", foreground="#444")
+        self.status.pack(anchor="w", pady=(4, 0))
+
         main = ttk.PanedWindow(self, orient="horizontal")
-        main.pack(fill="both", expand=True, padx=8, pady=8)
+        main.pack(side="top", fill="both", expand=True, padx=8, pady=8)
         left = ttk.Frame(main)
         right = ttk.Frame(main)
         main.add(left, weight=3)
@@ -148,10 +230,12 @@ class App(tk.Tk):
 
         nb = ttk.Notebook(left)
         nb.pack(fill="both", expand=True)
-        t1, t2, t3 = (ttk.Frame(nb, padding=12) for _ in range(3))
-        nb.add(t1, text=" 1. Part and files ")
-        nb.add(t2, text=" 2. Sectioning ")
-        nb.add(t3, text=" 3. Bambu Studio project ")
+        tabs = [ScrollFrame(nb) for _ in range(3)]
+        nb.add(tabs[0], text=" 1. Part and files ")
+        nb.add(tabs[1], text=" 2. Sectioning ")
+        nb.add(tabs[2], text=" 3. Bambu Studio project ")
+        t1, t2, t3 = (t.inner for t in tabs)   # the fields go in the scrollable part
+        self.notebook = nb
 
         # ---- tab 1: files -----------------------------------------------
         t1.columnconfigure(1, weight=1)
@@ -270,37 +354,27 @@ class App(tk.Tk):
                               self.rot_entry, self.wall_entry, self.settings_text]
 
         # ---- right: preview + log ---------------------------------------------
-        right.rowconfigure(0, weight=3)
-        right.rowconfigure(1, weight=2)
-        right.columnconfigure(0, weight=1)
-        self.canvas = tk.Canvas(right, bg="#fcfcfb", highlightthickness=1,
-                                highlightbackground="#bbb", height=330)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        # preview above, log below: drag the bar between them to give room to either
+        split = ttk.PanedWindow(right, orient="vertical")
+        split.pack(fill="both", expand=True)
+        top = ttk.Frame(split)
+        low = ttk.Frame(split)
+        split.add(top, weight=3)
+        split.add(low, weight=2)
+        self.split = split
+        self.canvas = tk.Canvas(top, bg="#fcfcfb", highlightthickness=1,
+                                highlightbackground="#bbb", height=160)
+        self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda _e: self._schedule_redraw())
         self.canvas.create_text(20, 20, anchor="nw", fill="#888", tags="hint",
                                 text="Press \"Preview regions\" to see the regions\n"
                                      "before any file is written.")
-        self.log = tk.Text(right, height=9, state="disabled", wrap="word", bg="#f7f7f5")
-        self.log.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-
-        # ---- bottom: command + buttons --------------------------------------
-        bottom = ttk.Frame(self)
-        bottom.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Label(bottom, text="Equivalent command:").pack(anchor="w")
-        self.cmd = tk.Text(bottom, height=3, wrap="word", bg="#f7f7f5", state="disabled")
-        self.cmd.pack(fill="x")
-        bar = ttk.Frame(bottom)
-        bar.pack(fill="x", pady=(6, 0))
-        self.btn_prev = ttk.Button(bar, text="Preview regions", command=self.preview)
-        self.btn_gen = ttk.Button(bar, text="Generate", command=self.generate)
-        self.btn_prev.pack(side="left")
-        self.btn_gen.pack(side="left", padx=6)
-        ttk.Button(bar, text="Open output folder", command=self.open_out).pack(side="left")
-        ttk.Button(bar, text="Copy command", command=self.copy_cmd).pack(side="right")
-        ttk.Button(bar, text="Load preset…", command=self.load_preset).pack(side="right", padx=6)
-        ttk.Button(bar, text="Save preset…", command=self.save_preset).pack(side="right")
-        self.status = ttk.Label(bottom, text="", foreground="#444")
-        self.status.pack(anchor="w", pady=(4, 0))
+        logbar = ttk.Scrollbar(low, orient="vertical")
+        self.log = tk.Text(low, height=5, state="disabled", wrap="word", bg="#f7f7f5",
+                           yscrollcommand=logbar.set)
+        logbar.configure(command=self.log.yview)
+        logbar.pack(side="right", fill="y")
+        self.log.pack(side="left", fill="both", expand=True)
 
     # ------------------------------------------------------------- callbacks
     def _pick_model(self, key):

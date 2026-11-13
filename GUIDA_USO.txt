@@ -97,7 +97,9 @@ Nell'elenco devono comparire --export-3mf, --plate-rotation, --extra-angle,
 --------------------------------------------------------------------------------------------
 
 La finestra ha tre schede a sinistra, l'anteprima e il log a destra, il comando
-equivalente e i pulsanti in basso.
+equivalente e i pulsanti in basso. La barra in basso e' sempre visibile; una scheda piu'
+alta della finestra scorre (rotellina del mouse o barra a destra); puoi trascinare la barra
+tra anteprima e log, e quella tra schede e anteprima.
 
 PASSO 1 - Scheda "1. Pezzo e file"
   - Modello: premi Sfoglia e scegli lo STL (o lo STEP) del pezzo.
